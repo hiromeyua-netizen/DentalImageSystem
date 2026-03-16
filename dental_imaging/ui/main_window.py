@@ -21,6 +21,10 @@ from dental_imaging.exceptions import (
     CameraConnectionError,
     CameraGrabError,
 )
+from dental_imaging.hardware.camera.camera_settings_helper import (
+    get_camera_settings,
+    print_camera_settings,
+)
 
 
 class MainWindow(QMainWindow):
@@ -113,6 +117,9 @@ class MainWindow(QMainWindow):
             # Configure camera
             self.camera.configure(config)
             self.camera_config = config
+            
+            # Print camera settings for diagnostics
+            print_camera_settings(self.camera)
             
             self.statusBar().showMessage("Camera connected successfully")
             self.start_button.setEnabled(True)
