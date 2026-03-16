@@ -125,6 +125,43 @@ class MainWindow(QMainWindow):
         self.gain_spinbox.valueChanged.connect(self.on_gain_spinbox_changed)
         settings_layout.addWidget(self.gain_spinbox, 1, 3)
         
+        # White balance control
+        settings_layout.addWidget(QLabel("White Balance:"), 2, 0)
+        
+        self.white_balance_auto_checkbox = QCheckBox("Auto")
+        self.white_balance_auto_checkbox.setChecked(True)
+        self.white_balance_auto_checkbox.stateChanged.connect(self.on_white_balance_auto_changed)
+        settings_layout.addWidget(self.white_balance_auto_checkbox, 2, 1)
+        
+        # Frame rate control
+        settings_layout.addWidget(QLabel("Frame Rate:"), 3, 0)
+        
+        self.frame_rate_spinbox = QDoubleSpinBox()
+        self.frame_rate_spinbox.setRange(1.0, 60.0)
+        self.frame_rate_spinbox.setValue(30.0)
+        self.frame_rate_spinbox.setSuffix(" fps")
+        self.frame_rate_spinbox.setSingleStep(1.0)
+        self.frame_rate_spinbox.setDecimals(1)
+        self.frame_rate_spinbox.valueChanged.connect(self.on_frame_rate_changed)
+        settings_layout.addWidget(self.frame_rate_spinbox, 3, 1, 1, 3)
+        
+        # Gamma control (if supported)
+        settings_layout.addWidget(QLabel("Gamma:"), 4, 0)
+        
+        self.gamma_slider = QSlider(Qt.Orientation.Horizontal)
+        self.gamma_slider.setRange(50, 300)  # 0.5 to 3.0 (multiply by 0.01)
+        self.gamma_slider.setValue(100)  # 1.0 default
+        self.gamma_slider.valueChanged.connect(self.on_gamma_changed)
+        settings_layout.addWidget(self.gamma_slider, 4, 2)
+        
+        self.gamma_spinbox = QDoubleSpinBox()
+        self.gamma_spinbox.setRange(0.5, 3.0)
+        self.gamma_spinbox.setValue(1.0)
+        self.gamma_spinbox.setSingleStep(0.1)
+        self.gamma_spinbox.setDecimals(2)
+        self.gamma_spinbox.valueChanged.connect(self.on_gamma_spinbox_changed)
+        settings_layout.addWidget(self.gamma_spinbox, 4, 3)
+        
         main_layout.addWidget(settings_group)
         
         # Control buttons
@@ -374,6 +411,33 @@ class MainWindow(QMainWindow):
             self.gain_slider.setEnabled(not gain_auto)
             self.gain_spinbox.setEnabled(not gain_auto)
             
+            # Get current white balance
+            try:
+                wb_auto = self.camera.get_white_balance()
+                self.white_balance_auto_checkbox.setChecked(wb_auto)
+            except Exception:
+                # White balance not supported
+                self.white_balance_auto_checkbox.setEnabled(False)
+            
+            # Get current frame rate
+            try:
+                frame_rate = self.camera.get_frame_rate()
+                if frame_rate > 0:
+                    self.frame_rate_spinbox.setValue(frame_rate)
+            except Exception:
+                pass
+            
+            # Get current gamma
+            try:
+                gamma = self.camera.get_gamma()
+                if gamma is not None:
+                    self.gamma_slider.setValue(int(gamma * 100))
+                    self.gamma_spinbox.setValue(gamma)
+            except Exception:
+                # Gamma not supported, disable controls
+                self.gamma_slider.setEnabled(False)
+                self.gamma_spinbox.setEnabled(False)
+            
         finally:
             self._updating_settings = False
     
@@ -480,6 +544,70 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"Gain: {value:.1f}")
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to set gain: {e}")
+    
+    def on_white_balance_auto_changed(self, state: int) -> None:
+        """Handle white balance auto checkbox change."""
+        if self._updating_settings or not self.camera or not self.camera.is_connected:
+            return
+        
+        auto = state == Qt.CheckState.Checked
+        
+        try:
+            self.camera.set_white_balance(auto=auto)
+            self.statusBar().showMessage(f"White Balance: {'Auto' if auto else 'Manual'}")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to set white balance: {e}")
+            # Revert checkbox if failed
+            self.white_balance_auto_checkbox.blockSignals(True)
+            self.white_balance_auto_checkbox.setChecked(not auto)
+            self.white_balance_auto_checkbox.blockSignals(False)
+    
+    def on_frame_rate_changed(self, value: float) -> None:
+        """Handle frame rate spinbox change."""
+        if self._updating_settings or not self.camera or not self.camera.is_connected:
+            return
+        
+        try:
+            self.camera.set_frame_rate(value)
+            self.statusBar().showMessage(f"Frame Rate: {value:.1f} fps")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to set frame rate: {e}")
+    
+    def on_gamma_changed(self, value: int) -> None:
+        """Handle gamma slider change."""
+        if self._updating_settings:
+            return
+        
+        gamma_value = value / 100.0
+        self.gamma_spinbox.blockSignals(True)
+        self.gamma_spinbox.setValue(gamma_value)
+        self.gamma_spinbox.blockSignals(False)
+        
+        if self.camera and self.camera.is_connected:
+            try:
+                self.camera.set_gamma(gamma_value)
+                self.statusBar().showMessage(f"Gamma: {gamma_value:.2f}")
+            except Exception as e:
+                # Gamma not supported, silently fail
+                pass
+    
+    def on_gamma_spinbox_changed(self, value: float) -> None:
+        """Handle gamma spinbox change."""
+        if self._updating_settings:
+            return
+        
+        slider_value = int(value * 100)
+        self.gamma_slider.blockSignals(True)
+        self.gamma_slider.setValue(slider_value)
+        self.gamma_slider.blockSignals(False)
+        
+        if self.camera and self.camera.is_connected:
+            try:
+                self.camera.set_gamma(value)
+                self.statusBar().showMessage(f"Gamma: {value:.2f}")
+            except Exception as e:
+                # Gamma not supported, silently fail
+                pass
     
     def closeEvent(self, event) -> None:
         """Handle window close event."""

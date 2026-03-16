@@ -348,6 +348,127 @@ class BaslerCamera:
         except Exception:
             return (False, 0.0)
     
+    def set_white_balance(self, auto: bool = True) -> None:
+        """
+        Set white balance mode.
+        
+        Args:
+            auto: If True, enable auto white balance
+            
+        Raises:
+            CameraConnectionError: If camera is not connected
+            CameraConfigurationError: If setting fails
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+        
+        try:
+            if auto:
+                self.camera.BalanceWhiteAuto.SetValue("Continuous")
+            else:
+                self.camera.BalanceWhiteAuto.SetValue("Off")
+            
+            # Update config if exists
+            if self.config:
+                self.config.white_balance.auto = auto
+                
+        except Exception as e:
+            # White balance not supported on all cameras
+            raise CameraConfigurationError(f"Failed to set white balance: {str(e)}") from e
+    
+    def get_white_balance(self) -> bool:
+        """
+        Get current white balance mode.
+        
+        Returns:
+            True if auto white balance is enabled, False otherwise
+        """
+        if not self.is_connected:
+            return False
+        
+        try:
+            return self.camera.BalanceWhiteAuto.GetValue() == "Continuous"
+        except Exception:
+            return False
+    
+    def set_frame_rate(self, frame_rate: float) -> None:
+        """
+        Set frame rate.
+        
+        Args:
+            frame_rate: Target frame rate in fps
+            
+        Raises:
+            CameraConnectionError: If camera is not connected
+            CameraConfigurationError: If setting fails
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+        
+        try:
+            self.camera.AcquisitionFrameRateEnable.SetValue(True)
+            self.camera.AcquisitionFrameRate.SetValue(frame_rate)
+            
+            # Update config if exists
+            if self.config:
+                self.config.frame_rate = int(frame_rate)
+                
+        except Exception as e:
+            # Frame rate control not supported on all cameras
+            raise CameraConfigurationError(f"Failed to set frame rate: {str(e)}") from e
+    
+    def get_frame_rate(self) -> float:
+        """
+        Get current frame rate.
+        
+        Returns:
+            Current frame rate in fps, or 0 if not available
+        """
+        if not self.is_connected:
+            return 0.0
+        
+        try:
+            if self.camera.AcquisitionFrameRateEnable.GetValue():
+                return float(self.camera.AcquisitionFrameRate.GetValue())
+            return 0.0
+        except Exception:
+            return 0.0
+    
+    def set_gamma(self, gamma: float) -> None:
+        """
+        Set gamma correction value.
+        
+        Args:
+            gamma: Gamma value (typically 0.5 to 3.0)
+            
+        Raises:
+            CameraConnectionError: If camera is not connected
+            CameraConfigurationError: If setting fails
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+        
+        try:
+            self.camera.Gamma.SetValue(gamma)
+        except Exception as e:
+            # Gamma not supported on all cameras
+            raise CameraConfigurationError(f"Failed to set gamma: {str(e)}") from e
+    
+    def get_gamma(self) -> Optional[float]:
+        """
+        Get current gamma value.
+        
+        Returns:
+            Current gamma value, or None if not available
+        """
+        if not self.is_connected:
+            return None
+        
+        try:
+            return float(self.camera.Gamma.GetValue())
+        except Exception:
+            return None
+    
     def __enter__(self):
         """Context manager entry."""
         if not self.is_connected:
