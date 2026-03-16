@@ -68,12 +68,25 @@ class PreviewWidget(QLabel):
         )
         
         # Scale pixmap to fit widget while maintaining aspect ratio
+        # Use FastTransformation for better performance and sharpness
+        # (since we already resized the frame in resize_for_preview)
         pixmap = QPixmap.fromImage(qt_image)
-        scaled_pixmap = pixmap.scaled(
-            self.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
+        
+        # Only scale if the pixmap is larger than widget size
+        # This avoids unnecessary scaling that causes blur
+        if pixmap.width() > self.width() or pixmap.height() > self.height():
+            scaled_pixmap = pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation  # Faster and sharper for already-resized images
+            )
+        else:
+            # If pixmap is smaller, use SmoothTransformation for upscaling
+            scaled_pixmap = pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
         
         self.setPixmap(scaled_pixmap)
         self.frame_displayed.emit()

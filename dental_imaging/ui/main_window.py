@@ -32,6 +32,7 @@ from dental_imaging.hardware.camera.camera_settings_helper import (
     get_camera_settings,
     print_camera_settings,
 )
+from dental_imaging.hardware.camera.focus_helper import diagnose_blur_issues
 
 
 class MainWindow(QMainWindow):
@@ -181,6 +182,10 @@ class MainWindow(QMainWindow):
         self.capture_button.clicked.connect(self.capture_image)
         self.capture_button.setEnabled(False)
         button_layout.addWidget(self.capture_button)
+        
+        self.diagnose_button = QPushButton("Diagnose Blur")
+        self.diagnose_button.clicked.connect(self.diagnose_blur)
+        button_layout.addWidget(self.diagnose_button)
         
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
@@ -608,6 +613,38 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 # Gamma not supported, silently fail
                 pass
+    
+    def diagnose_blur(self) -> None:
+        """Diagnose potential blur issues."""
+        if not self.camera or not self.camera.is_connected:
+            QMessageBox.warning(
+                self,
+                "Camera Not Ready",
+                "Camera is not connected."
+            )
+            return
+        
+        issues = diagnose_blur_issues(self.camera)
+        
+        message = "Blur Diagnosis:\n\n"
+        if len(issues) == 1 and "No obvious software issues" in issues[0]:
+            message += "✓ " + issues[0] + "\n\n"
+            message += "Recommendations:\n"
+            message += "1. Check physical camera lens focus\n"
+            message += "2. Ensure camera is stable (no vibration)\n"
+            message += "3. Check if lens cap is removed\n"
+            message += "4. Verify camera is at correct distance from subject"
+        else:
+            message += "Potential Issues:\n"
+            for issue in issues:
+                message += f"• {issue}\n"
+            message += "\nRecommendations:\n"
+            message += "1. Adjust exposure time if motion blur detected\n"
+            message += "2. Check physical camera lens focus\n"
+            message += "3. Ensure adequate lighting\n"
+            message += "4. Verify camera resolution settings"
+        
+        QMessageBox.information(self, "Blur Diagnosis", message)
     
     def closeEvent(self, event) -> None:
         """Handle window close event."""

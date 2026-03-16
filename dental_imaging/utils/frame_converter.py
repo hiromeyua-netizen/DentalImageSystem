@@ -94,6 +94,7 @@ def grab_result_to_opencv(grab_result: pylon.GrabResult) -> Optional[np.ndarray]
 def resize_for_preview(image: np.ndarray, target_width: int = 1920, target_height: int = 1080) -> np.ndarray:
     """
     Resize image for preview display while maintaining aspect ratio.
+    Uses high-quality interpolation for better sharpness.
     
     Args:
         image: Input image as numpy array
@@ -108,6 +109,10 @@ def resize_for_preview(image: np.ndarray, target_width: int = 1920, target_heigh
     
     height, width = image.shape[:2]
     
+    # If image is already smaller than target, don't upscale (causes blur)
+    if width <= target_width and height <= target_height:
+        return image
+    
     # Calculate scaling factor to fit within target dimensions
     scale_w = target_width / width
     scale_h = target_height / height
@@ -117,7 +122,14 @@ def resize_for_preview(image: np.ndarray, target_width: int = 1920, target_heigh
     new_width = int(width * scale)
     new_height = int(height * scale)
     
-    # Resize image
-    resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+    # Use high-quality interpolation for downscaling
+    # INTER_LANCZOS4 is best for downscaling, INTER_CUBIC is faster alternative
+    if scale < 0.5:  # Significant downscaling
+        interpolation = cv2.INTER_LANCZOS4
+    else:  # Moderate downscaling
+        interpolation = cv2.INTER_CUBIC
+    
+    # Resize image with high-quality interpolation
+    resized = cv2.resize(image, (new_width, new_height), interpolation=interpolation)
     
     return resized
