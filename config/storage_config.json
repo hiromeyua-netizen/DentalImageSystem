@@ -1,0 +1,23 @@
+{
+  "primary_storage": {
+    "type": "local",
+    "path": "DentalImages"
+  },
+  "secondary_storage": {
+    "enabled": false,
+    "type": "network",
+    "path": ""
+  },
+  "export_formats": [
+    "png",
+    "dicom"
+  ],
+  "file_naming": {
+    "format": "datetime_patientid",
+    "datetime_format": "%Y-%m-%d_%H-%M-%S"
+  },
+  "organization": {
+    "create_patient_folders": true,
+    "folder_format": "Patient_{patient_id}"
+  }
+}

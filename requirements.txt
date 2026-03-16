@@ -1,0 +1,13 @@
+# Core dependencies
+PyQt6>=6.6.0
+pypylon>=26.2.1
+opencv-python>=4.8.0
+pyserial>=3.5
+pydicom>=2.4.0
+
+# Image processing
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Utilities
+python-dateutil>=2.8.0

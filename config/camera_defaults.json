@@ -1,0 +1,18 @@
+{
+  "resolution": {
+    "width": 4024,
+    "height": 3036
+  },
+  "exposure": {
+    "auto": false,
+    "value": 10000
+  },
+  "gain": {
+    "auto": false,
+    "value": 1.0
+  },
+  "white_balance": {
+    "auto": true
+  },
+  "frame_rate": 30
+}

@@ -1,0 +1,20 @@
+{
+  "default_brightness": 50,
+  "presets": [
+    {
+      "name": "Wide View",
+      "brightness": 40,
+      "description": "Lower brightness for wide area shots"
+    },
+    {
+      "name": "Medium View",
+      "brightness": 50,
+      "description": "Standard brightness for general use"
+    },
+    {
+      "name": "Tight Tooth View",
+      "brightness": 70,
+      "description": "Higher brightness for close-up tooth shots"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "application": {
+    "name": "Dental Imaging System",
+    "version": "0.1.0",
+    "kiosk_mode": true,
+    "fullscreen": true,
+    "splash_screen_duration": 2000
+  },
+  "preview": {
+    "resolution": {
+      "width": 1920,
+      "height": 1080
+    },
+    "fps": 30
+  },
+  "capture": {
+    "resolution": {
+      "width": 4024,
+      "height": 3036
+    },
+    "led_stabilization_delay_ms": 50,
+    "target_capture_time_ms": 150,
+    "shutter_sound_enabled": true
+  },
+  "storage": {
+    "default_path": "DentalImages",
+    "default_format": "png",
+    "auto_organize": true
+  },
+  "ui": {
+    "theme": "default",
+    "touch_friendly": true,
+    "button_size": "large"
+  }
+}
