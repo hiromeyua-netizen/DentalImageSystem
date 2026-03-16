@@ -5,7 +5,6 @@ Main entry point for the Dental Imaging System application.
 import sys
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -21,9 +20,8 @@ def main():
     app.setApplicationName("Dental Imaging System")
     app.setApplicationVersion("0.1.0")
     
-    # Enable high DPI scaling
-    app.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    # Note: High DPI scaling is enabled by default in PyQt6
+    # No need to set AA_EnableHighDpiScaling or AA_UseHighDpiPixmaps
     
     try:
         # Create and show main window

@@ -214,7 +214,15 @@ class BaslerCamera:
                 grab_result = self.camera.GrabOne(timeout_ms)
             else:
                 # Retrieve latest frame from continuous grabbing
-                grab_result = self.camera.RetrieveResult(timeout_ms, pylon.TimeoutHandling_ThrowException)
+                # Use ReturnIfTimeout to avoid exceptions on timeout
+                grab_result = self.camera.RetrieveResult(
+                    timeout_ms, 
+                    pylon.TimeoutHandling_Return
+                )
+                
+                # Check if we got a valid result
+                if not grab_result.GrabSucceeded():
+                    return None
             
             if not grab_result.GrabSucceeded():
                 return None
@@ -225,7 +233,7 @@ class BaslerCamera:
             return img
             
         except pylon.TimeoutException:
-            raise CameraGrabError(f"Frame grab timeout after {timeout_ms}ms")
+            return None  # Return None instead of raising for continuous grabbing
         except Exception as e:
             raise CameraGrabError(f"Failed to grab frame: {str(e)}") from e
     

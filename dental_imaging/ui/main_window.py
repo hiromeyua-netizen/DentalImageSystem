@@ -184,17 +184,14 @@ class MainWindow(QMainWindow):
     
     def start_preview(self):
         """Start camera preview."""
-        try:
-            self.preview_widget.start_preview()
+        success = self.preview_widget.start_preview()
+        if success:
             self.preview_button.setText("Stop Preview")
             self.statusBar().showMessage("Preview active")
             self.status_label.setText("Preview active")
-        except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Preview Error",
-                f"Failed to start preview:\n\n{str(e)}"
-            )
+        else:
+            # Error message already shown via signal
+            self.preview_button.setText("Start Preview")
     
     def stop_preview(self):
         """Stop camera preview."""
@@ -209,9 +206,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Error: {error_message}")
         self.status_label.setText(f"Error: {error_message}")
         
-        # Stop preview on error
-        if self.preview_widget.is_previewing:
-            self.stop_preview()
+        # Only stop preview for critical errors, not for occasional frame grab failures
+        if "Failed to start preview" in error_message or "Camera not connected" in error_message:
+            if self.preview_widget.is_previewing:
+                self.stop_preview()
     
     def closeEvent(self, event):
         """Handle window close event."""

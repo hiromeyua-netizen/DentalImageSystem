@@ -4,6 +4,7 @@ Preview widget for displaying camera feed.
 
 from typing import Optional
 import numpy as np
+import cv2
 from PyQt6.QtWidgets import QWidget, QLabel
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
@@ -82,11 +83,11 @@ class PreviewWidget(QWidget):
         """Start the preview stream."""
         if not self.camera:
             self.camera_error.emit("No camera set")
-            return
+            return False
         
         if not self.camera.is_connected:
             self.camera_error.emit("Camera not connected")
-            return
+            return False
         
         try:
             # Start continuous grabbing
@@ -96,9 +97,12 @@ class PreviewWidget(QWidget):
             # Start update timer
             self.update_timer.start(self.update_interval_ms)
             self.is_previewing = True
+            return True
             
         except Exception as e:
+            self.is_previewing = False
             self.camera_error.emit(f"Failed to start preview: {str(e)}")
+            return False
     
     def stop_preview(self):
         """Stop the preview stream."""
@@ -116,6 +120,9 @@ class PreviewWidget(QWidget):
         if not self.camera or not self.camera.is_connected:
             return
         
+        if not self.is_previewing:
+            return
+        
         try:
             # Grab preview frame
             frame = self.camera.grab_preview_frame(
@@ -123,17 +130,19 @@ class PreviewWidget(QWidget):
                 self.preview_height
             )
             
-            if frame is not None:
+            if frame is not None and frame.size > 0:
                 self.display_frame(frame)
                 self.frame_updated.emit()
-            else:
-                # Frame grab failed, but don't show error for every missed frame
-                pass
+            # If frame is None, just skip this update (don't emit error for occasional missed frames)
                 
         except CameraGrabError as e:
-            self.camera_error.emit(f"Frame grab error: {str(e)}")
+            # Only emit error if we're still previewing (avoid spam)
+            if self.is_previewing:
+                self.camera_error.emit(f"Frame grab error: {str(e)}")
         except Exception as e:
-            self.camera_error.emit(f"Preview error: {str(e)}")
+            # Only emit error if we're still previewing
+            if self.is_previewing:
+                self.camera_error.emit(f"Preview error: {str(e)}")
     
     def display_frame(self, frame: np.ndarray):
         """
@@ -145,33 +154,51 @@ class PreviewWidget(QWidget):
         if frame is None or frame.size == 0:
             return
         
-        # Convert numpy array to QImage
-        height, width, channel = frame.shape
-        bytes_per_line = 3 * width
-        
-        # Convert BGR to RGB for Qt
-        rgb_frame = np.flip(frame, axis=2)  # BGR to RGB
-        
-        q_image = QImage(
-            rgb_frame.data,
-            width,
-            height,
-            bytes_per_line,
-            QImage.Format.Format_RGB888
-        )
-        
-        # Convert to QPixmap and scale to fit label
-        pixmap = QPixmap.fromImage(q_image)
-        
-        # Scale pixmap to fit label while maintaining aspect ratio
-        label_size = self.image_label.size()
-        scaled_pixmap = pixmap.scaled(
-            label_size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        
-        self.image_label.setPixmap(scaled_pixmap)
+        try:
+            # Ensure frame is contiguous and correct format
+            if not frame.flags['C_CONTIGUOUS']:
+                frame = np.ascontiguousarray(frame)
+            
+            # Convert numpy array to QImage
+            height, width = frame.shape[:2]
+            
+            # Convert BGR to RGB for Qt
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Ensure RGB frame is contiguous
+            if not rgb_frame.flags['C_CONTIGUOUS']:
+                rgb_frame = np.ascontiguousarray(rgb_frame)
+            
+            bytes_per_line = 3 * width
+            
+            # Create QImage (Qt will copy the data)
+            q_image = QImage(
+                rgb_frame.data,
+                width,
+                height,
+                bytes_per_line,
+                QImage.Format.Format_RGB888
+            )
+            
+            # Convert to QPixmap and scale to fit label
+            pixmap = QPixmap.fromImage(q_image)
+            
+            # Scale pixmap to fit label while maintaining aspect ratio
+            label_size = self.image_label.size()
+            if label_size.width() > 0 and label_size.height() > 0:
+                scaled_pixmap = pixmap.scaled(
+                    label_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.image_label.setPixmap(scaled_pixmap)
+            else:
+                # Label not sized yet, just set the pixmap
+                self.image_label.setPixmap(pixmap)
+                
+        except Exception as e:
+            # Silently handle display errors to avoid spam
+            print(f"Display frame error: {e}")
     
     def resizeEvent(self, event):
         """Handle widget resize."""
