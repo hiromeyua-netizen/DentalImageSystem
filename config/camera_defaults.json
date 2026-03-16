@@ -4,12 +4,12 @@
     "height": 3036
   },
   "exposure": {
-    "auto": true,
-    "value": 50000
+    "auto": false,
+    "value": 100000
   },
   "gain": {
-    "auto": true,
-    "value": 5.0
+    "auto": false,
+    "value": 10.0
   },
   "white_balance": {
     "auto": true

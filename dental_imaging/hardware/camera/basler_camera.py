@@ -246,6 +246,98 @@ class BaslerCamera:
         
         return resize_for_preview(frame, preview_width, preview_height)
     
+    def set_exposure(self, exposure_time_us: int, auto: bool = False) -> None:
+        """
+        Set camera exposure time.
+        
+        Args:
+            exposure_time_us: Exposure time in microseconds
+            auto: If True, enable auto-exposure
+            
+        Raises:
+            CameraConnectionError: If camera is not connected
+            CameraConfigurationError: If setting fails
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+        
+        try:
+            if auto:
+                self.camera.ExposureAuto.SetValue("Continuous")
+            else:
+                self.camera.ExposureAuto.SetValue("Off")
+                self.camera.ExposureTime.SetValue(exposure_time_us)
+                
+                # Update config if exists
+                if self.config:
+                    self.config.exposure.auto = auto
+                    self.config.exposure.value = exposure_time_us
+        except Exception as e:
+            raise CameraConfigurationError(f"Failed to set exposure: {str(e)}") from e
+    
+    def set_gain(self, gain: float, auto: bool = False) -> None:
+        """
+        Set camera gain.
+        
+        Args:
+            gain: Gain value
+            auto: If True, enable auto-gain
+            
+        Raises:
+            CameraConnectionError: If camera is not connected
+            CameraConfigurationError: If setting fails
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+        
+        try:
+            if auto:
+                self.camera.GainAuto.SetValue("Continuous")
+            else:
+                self.camera.GainAuto.SetValue("Off")
+                self.camera.Gain.SetValue(gain)
+                
+                # Update config if exists
+                if self.config:
+                    self.config.gain.auto = auto
+                    self.config.gain.value = gain
+        except Exception as e:
+            raise CameraConfigurationError(f"Failed to set gain: {str(e)}") from e
+    
+    def get_exposure_range(self) -> tuple:
+        """
+        Get minimum and maximum exposure time values.
+        
+        Returns:
+            Tuple of (min_exposure, max_exposure) in microseconds
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+        
+        try:
+            min_exp = self.camera.ExposureTime.GetMin()
+            max_exp = self.camera.ExposureTime.GetMax()
+            return (min_exp, max_exp)
+        except Exception:
+            return (1000, 1000000)  # Default range if not available
+    
+    def get_gain_range(self) -> tuple:
+        """
+        Get minimum and maximum gain values.
+        
+        Returns:
+            Tuple of (min_gain, max_gain)
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+        
+        try:
+            min_gain = self.camera.Gain.GetMin()
+            max_gain = self.camera.Gain.GetMax()
+            return (min_gain, max_gain)
+        except Exception:
+            return (0.0, 48.0)  # Default range if not available
+    
     def __enter__(self):
         """Context manager entry."""
         if not self.is_connected:
