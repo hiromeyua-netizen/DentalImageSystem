@@ -2,7 +2,7 @@
 Basler camera wrapper class for camera operations.
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 import numpy as np
 from pypylon import pylon
 from dental_imaging.hardware.camera.camera_detection import CameraInfo
@@ -248,7 +248,7 @@ class BaslerCamera:
     
     def set_exposure(self, exposure_time_us: int, auto: bool = False) -> None:
         """
-        Set camera exposure time.
+        Set exposure time in real-time.
         
         Args:
             exposure_time_us: Exposure time in microseconds
@@ -267,17 +267,19 @@ class BaslerCamera:
             else:
                 self.camera.ExposureAuto.SetValue("Off")
                 self.camera.ExposureTime.SetValue(exposure_time_us)
-                
-                # Update config if exists
-                if self.config:
-                    self.config.exposure.auto = auto
+            
+            # Update config if exists
+            if self.config:
+                self.config.exposure.auto = auto
+                if not auto:
                     self.config.exposure.value = exposure_time_us
+                    
         except Exception as e:
             raise CameraConfigurationError(f"Failed to set exposure: {str(e)}") from e
     
     def set_gain(self, gain: float, auto: bool = False) -> None:
         """
-        Set camera gain.
+        Set gain in real-time.
         
         Args:
             gain: Gain value
@@ -296,47 +298,55 @@ class BaslerCamera:
             else:
                 self.camera.GainAuto.SetValue("Off")
                 self.camera.Gain.SetValue(gain)
-                
-                # Update config if exists
-                if self.config:
-                    self.config.gain.auto = auto
+            
+            # Update config if exists
+            if self.config:
+                self.config.gain.auto = auto
+                if not auto:
                     self.config.gain.value = gain
+                    
         except Exception as e:
             raise CameraConfigurationError(f"Failed to set gain: {str(e)}") from e
     
-    def get_exposure_range(self) -> tuple:
+    def get_exposure(self) -> Tuple[bool, int]:
         """
-        Get minimum and maximum exposure time values.
+        Get current exposure settings.
         
         Returns:
-            Tuple of (min_exposure, max_exposure) in microseconds
+            Tuple of (is_auto, exposure_time_us)
         """
         if not self.is_connected:
-            raise CameraConnectionError("Camera not connected. Call connect() first.")
+            return (False, 0)
         
         try:
-            min_exp = self.camera.ExposureTime.GetMin()
-            max_exp = self.camera.ExposureTime.GetMax()
-            return (min_exp, max_exp)
+            auto = self.camera.ExposureAuto.GetValue() == "Continuous"
+            if auto:
+                return (True, 0)
+            else:
+                exposure = int(self.camera.ExposureTime.GetValue())
+                return (False, exposure)
         except Exception:
-            return (1000, 1000000)  # Default range if not available
+            return (False, 0)
     
-    def get_gain_range(self) -> tuple:
+    def get_gain(self) -> Tuple[bool, float]:
         """
-        Get minimum and maximum gain values.
+        Get current gain settings.
         
         Returns:
-            Tuple of (min_gain, max_gain)
+            Tuple of (is_auto, gain_value)
         """
         if not self.is_connected:
-            raise CameraConnectionError("Camera not connected. Call connect() first.")
+            return (False, 0.0)
         
         try:
-            min_gain = self.camera.Gain.GetMin()
-            max_gain = self.camera.Gain.GetMax()
-            return (min_gain, max_gain)
+            auto = self.camera.GainAuto.GetValue() == "Continuous"
+            if auto:
+                return (True, 0.0)
+            else:
+                gain = float(self.camera.Gain.GetValue())
+                return (False, gain)
         except Exception:
-            return (0.0, 48.0)  # Default range if not available
+            return (False, 0.0)
     
     def __enter__(self):
         """Context manager entry."""

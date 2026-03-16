@@ -11,6 +11,13 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QStatusBar,
     QMessageBox,
+    QLabel,
+    QSlider,
+    QCheckBox,
+    QSpinBox,
+    QDoubleSpinBox,
+    QGroupBox,
+    QGridLayout,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from dental_imaging.ui.widgets.preview_widget import PreviewWidget
@@ -66,6 +73,60 @@ class MainWindow(QMainWindow):
         self.preview_widget = PreviewWidget()
         main_layout.addWidget(self.preview_widget, stretch=1)
         
+        # Camera settings controls
+        settings_group = QGroupBox("Camera Settings")
+        settings_layout = QGridLayout()
+        settings_group.setLayout(settings_layout)
+        
+        # Exposure controls
+        settings_layout.addWidget(QLabel("Exposure:"), 0, 0)
+        
+        self.exposure_auto_checkbox = QCheckBox("Auto")
+        self.exposure_auto_checkbox.setChecked(True)
+        self.exposure_auto_checkbox.stateChanged.connect(self.on_exposure_auto_changed)
+        settings_layout.addWidget(self.exposure_auto_checkbox, 0, 1)
+        
+        self.exposure_slider = QSlider(Qt.Orientation.Horizontal)
+        self.exposure_slider.setRange(1000, 200000)  # 1ms to 200ms
+        self.exposure_slider.setValue(50000)  # 50ms default
+        self.exposure_slider.setEnabled(False)
+        self.exposure_slider.valueChanged.connect(self.on_exposure_changed)
+        settings_layout.addWidget(self.exposure_slider, 0, 2)
+        
+        self.exposure_spinbox = QSpinBox()
+        self.exposure_spinbox.setRange(1000, 200000)
+        self.exposure_spinbox.setValue(50000)
+        self.exposure_spinbox.setSuffix(" μs")
+        self.exposure_spinbox.setEnabled(False)
+        self.exposure_spinbox.valueChanged.connect(self.on_exposure_spinbox_changed)
+        settings_layout.addWidget(self.exposure_spinbox, 0, 3)
+        
+        # Gain controls
+        settings_layout.addWidget(QLabel("Gain:"), 1, 0)
+        
+        self.gain_auto_checkbox = QCheckBox("Auto")
+        self.gain_auto_checkbox.setChecked(True)
+        self.gain_auto_checkbox.stateChanged.connect(self.on_gain_auto_changed)
+        settings_layout.addWidget(self.gain_auto_checkbox, 1, 1)
+        
+        self.gain_slider = QSlider(Qt.Orientation.Horizontal)
+        self.gain_slider.setRange(0, 200)  # 0.0 to 20.0 (multiply by 0.1)
+        self.gain_slider.setValue(50)  # 5.0 default
+        self.gain_slider.setEnabled(False)
+        self.gain_slider.valueChanged.connect(self.on_gain_changed)
+        settings_layout.addWidget(self.gain_slider, 1, 2)
+        
+        self.gain_spinbox = QDoubleSpinBox()
+        self.gain_spinbox.setRange(0.0, 20.0)
+        self.gain_spinbox.setValue(5.0)
+        self.gain_spinbox.setSingleStep(0.1)
+        self.gain_spinbox.setDecimals(1)
+        self.gain_spinbox.setEnabled(False)
+        self.gain_spinbox.valueChanged.connect(self.on_gain_spinbox_changed)
+        settings_layout.addWidget(self.gain_spinbox, 1, 3)
+        
+        main_layout.addWidget(settings_group)
+        
         # Control buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -86,6 +147,9 @@ class MainWindow(QMainWindow):
         
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
+        
+        # Flag to prevent recursive updates
+        self._updating_settings = False
         
         # Status bar
         self.statusBar().showMessage("Ready")
@@ -117,6 +181,9 @@ class MainWindow(QMainWindow):
             # Configure camera
             self.camera.configure(config)
             self.camera_config = config
+            
+            # Update UI controls with current settings
+            self._update_settings_ui()
             
             # Print camera settings for diagnostics
             print_camera_settings(self.camera)
@@ -280,6 +347,139 @@ class MainWindow(QMainWindow):
                 f"Unexpected error during capture.\n\n{str(e)}"
             )
             self.statusBar().showMessage("Capture error")
+    
+    def _update_settings_ui(self) -> None:
+        """Update UI controls with current camera settings."""
+        if not self.camera or not self.camera.is_connected:
+            return
+        
+        self._updating_settings = True
+        
+        try:
+            # Get current exposure settings
+            exp_auto, exp_value = self.camera.get_exposure()
+            self.exposure_auto_checkbox.setChecked(exp_auto)
+            if not exp_auto and exp_value > 0:
+                self.exposure_slider.setValue(exp_value)
+                self.exposure_spinbox.setValue(exp_value)
+            self.exposure_slider.setEnabled(not exp_auto)
+            self.exposure_spinbox.setEnabled(not exp_auto)
+            
+            # Get current gain settings
+            gain_auto, gain_value = self.camera.get_gain()
+            self.gain_auto_checkbox.setChecked(gain_auto)
+            if not gain_auto and gain_value > 0:
+                self.gain_slider.setValue(int(gain_value * 10))
+                self.gain_spinbox.setValue(gain_value)
+            self.gain_slider.setEnabled(not gain_auto)
+            self.gain_spinbox.setEnabled(not gain_auto)
+            
+        finally:
+            self._updating_settings = False
+    
+    def on_exposure_auto_changed(self, state: int) -> None:
+        """Handle exposure auto checkbox change."""
+        if self._updating_settings or not self.camera or not self.camera.is_connected:
+            return
+        
+        auto = state == Qt.CheckState.Checked
+        self.exposure_slider.setEnabled(not auto)
+        self.exposure_spinbox.setEnabled(not auto)
+        
+        if auto:
+            try:
+                self.camera.set_exposure(0, auto=True)
+                self.statusBar().showMessage("Exposure: Auto")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set auto-exposure: {e}")
+        else:
+            # Use current slider value
+            self.on_exposure_changed(self.exposure_slider.value())
+    
+    def on_exposure_changed(self, value: int) -> None:
+        """Handle exposure slider change."""
+        if self._updating_settings:
+            return
+        
+        self.exposure_spinbox.blockSignals(True)
+        self.exposure_spinbox.setValue(value)
+        self.exposure_spinbox.blockSignals(False)
+        
+        if not self.exposure_auto_checkbox.isChecked() and self.camera and self.camera.is_connected:
+            try:
+                self.camera.set_exposure(value, auto=False)
+                self.statusBar().showMessage(f"Exposure: {value/1000:.1f} ms")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set exposure: {e}")
+    
+    def on_exposure_spinbox_changed(self, value: int) -> None:
+        """Handle exposure spinbox change."""
+        if self._updating_settings:
+            return
+        
+        self.exposure_slider.blockSignals(True)
+        self.exposure_slider.setValue(value)
+        self.exposure_slider.blockSignals(False)
+        
+        if not self.exposure_auto_checkbox.isChecked() and self.camera and self.camera.is_connected:
+            try:
+                self.camera.set_exposure(value, auto=False)
+                self.statusBar().showMessage(f"Exposure: {value/1000:.1f} ms")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set exposure: {e}")
+    
+    def on_gain_auto_changed(self, state: int) -> None:
+        """Handle gain auto checkbox change."""
+        if self._updating_settings or not self.camera or not self.camera.is_connected:
+            return
+        
+        auto = state == Qt.CheckState.Checked
+        self.gain_slider.setEnabled(not auto)
+        self.gain_spinbox.setEnabled(not auto)
+        
+        if auto:
+            try:
+                self.camera.set_gain(0.0, auto=True)
+                self.statusBar().showMessage("Gain: Auto")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set auto-gain: {e}")
+        else:
+            # Use current slider value
+            self.on_gain_changed(self.gain_slider.value())
+    
+    def on_gain_changed(self, value: int) -> None:
+        """Handle gain slider change."""
+        if self._updating_settings:
+            return
+        
+        gain_value = value / 10.0
+        self.gain_spinbox.blockSignals(True)
+        self.gain_spinbox.setValue(gain_value)
+        self.gain_spinbox.blockSignals(False)
+        
+        if not self.gain_auto_checkbox.isChecked() and self.camera and self.camera.is_connected:
+            try:
+                self.camera.set_gain(gain_value, auto=False)
+                self.statusBar().showMessage(f"Gain: {gain_value:.1f}")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set gain: {e}")
+    
+    def on_gain_spinbox_changed(self, value: float) -> None:
+        """Handle gain spinbox change."""
+        if self._updating_settings:
+            return
+        
+        slider_value = int(value * 10)
+        self.gain_slider.blockSignals(True)
+        self.gain_slider.setValue(slider_value)
+        self.gain_slider.blockSignals(False)
+        
+        if not self.gain_auto_checkbox.isChecked() and self.camera and self.camera.is_connected:
+            try:
+                self.camera.set_gain(value, auto=False)
+                self.statusBar().showMessage(f"Gain: {value:.1f}")
+            except Exception as e:
+                QMessageBox.warning(self, "Error", f"Failed to set gain: {e}")
     
     def closeEvent(self, event) -> None:
         """Handle window close event."""
