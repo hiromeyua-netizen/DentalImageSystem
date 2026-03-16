@@ -4,24 +4,28 @@ Main application window.
 
 from typing import Optional
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QStatusBar, QMessageBox
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QStatusBar,
+    QMessageBox,
 )
-from PyQt6.QtCore import Qt, pyqtSlot
-from PyQt6.QtGui import QFont
-from dental_imaging.hardware.camera import BaslerCamera, get_first_available_camera
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from dental_imaging.ui.widgets.preview_widget import PreviewWidget
-from dental_imaging.core.config_manager import ConfigManager
+from dental_imaging.hardware.camera import BaslerCamera
+from dental_imaging.models.camera_config import CameraConfig
 from dental_imaging.exceptions import (
     CameraNotFoundError,
     CameraConnectionError,
-    CameraInitializationError
+    CameraGrabError,
 )
 
 
 class MainWindow(QMainWindow):
     """
-    Main application window for the dental imaging system.
+    Main application window for dental imaging system.
     """
     
     def __init__(self, parent: Optional[QWidget] = None):
@@ -34,36 +38,16 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         
         self.camera: Optional[BaslerCamera] = None
-        self.config_manager = ConfigManager()
+        self.camera_config: Optional[CameraConfig] = None
+        self.preview_timer: Optional[QTimer] = None
         
-        # Load configuration
-        try:
-            self.default_config = self.config_manager.get_default_config()
-            self.camera_config = self.config_manager.get_camera_config()
-            self.preview_width, self.preview_height = self.config_manager.get_preview_resolution()
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Configuration Error",
-                f"Failed to load configuration: {str(e)}"
-            )
-            raise
+        self._setup_ui()
+        self._setup_timers()
         
-        # Setup UI
-        self.setup_ui()
-        
-        # Initialize camera
-        self.init_camera()
-    
-    def setup_ui(self):
-        """Setup the user interface."""
-        self.setWindowTitle("Dental Imaging System")
-        
-        # Set window to fullscreen if kiosk mode is enabled
-        if self.default_config.get("application", {}).get("kiosk_mode", False):
-            self.showFullScreen()
-        else:
-            self.resize(1280, 720)
+    def _setup_ui(self) -> None:
+        """Set up the user interface."""
+        self.setWindowTitle("Dental Imaging System - Camera Preview")
+        self.setMinimumSize(1280, 720)
         
         # Central widget
         central_widget = QWidget()
@@ -75,153 +59,229 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(10)
         
         # Preview widget
-        self.preview_widget = PreviewWidget(self)
-        self.preview_widget.set_preview_size(self.preview_width, self.preview_height)
-        self.preview_widget.camera_error.connect(self.on_camera_error)
+        self.preview_widget = PreviewWidget()
         main_layout.addWidget(self.preview_widget, stretch=1)
         
-        # Control panel
-        control_layout = QHBoxLayout()
-        control_layout.setSpacing(10)
+        # Control buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
         
-        # Start/Stop Preview button
-        self.preview_button = QPushButton("Start Preview")
-        self.preview_button.setMinimumHeight(50)
-        self.preview_button.setFont(QFont("Arial", 12))
-        self.preview_button.clicked.connect(self.toggle_preview)
-        control_layout.addWidget(self.preview_button)
+        self.start_button = QPushButton("Start Preview")
+        self.start_button.clicked.connect(self.start_preview)
+        button_layout.addWidget(self.start_button)
         
-        # Capture button (disabled for now, will be implemented later)
+        self.stop_button = QPushButton("Stop Preview")
+        self.stop_button.clicked.connect(self.stop_preview)
+        self.stop_button.setEnabled(False)
+        button_layout.addWidget(self.stop_button)
+        
         self.capture_button = QPushButton("Capture")
-        self.capture_button.setMinimumHeight(50)
-        self.capture_button.setFont(QFont("Arial", 12))
+        self.capture_button.clicked.connect(self.capture_image)
         self.capture_button.setEnabled(False)
-        control_layout.addWidget(self.capture_button)
+        button_layout.addWidget(self.capture_button)
         
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("padding: 10px; background-color: #f0f0f0;")
-        control_layout.addWidget(self.status_label, stretch=1)
-        
-        main_layout.addLayout(control_layout)
+        button_layout.addStretch()
+        main_layout.addLayout(button_layout)
         
         # Status bar
-        self.statusBar().showMessage("Initializing...")
-    
-    def init_camera(self):
-        """Initialize camera connection."""
+        self.statusBar().showMessage("Ready")
+        
+    def _setup_timers(self) -> None:
+        """Set up timers for preview updates."""
+        self.preview_timer = QTimer()
+        self.preview_timer.timeout.connect(self.update_preview)
+        # Update at ~30 FPS
+        self.preview_timer.setInterval(33)  # ~30 FPS
+        
+    def initialize_camera(self, config: CameraConfig) -> bool:
+        """
+        Initialize camera with configuration.
+        
+        Args:
+            config: Camera configuration
+            
+        Returns:
+            True if initialization successful, False otherwise
+        """
         try:
-            self.statusBar().showMessage("Detecting camera...")
-            self.status_label.setText("Detecting camera...")
-            
-            # Get first available camera
-            camera_info = get_first_available_camera()
-            
-            if not camera_info:
-                raise CameraNotFoundError("No camera detected")
-            
-            self.statusBar().showMessage(f"Connecting to {camera_info.model_name}...")
-            self.status_label.setText(f"Connecting to {camera_info.model_name}...")
+            self.statusBar().showMessage("Connecting to camera...")
             
             # Create and connect camera
-            self.camera = BaslerCamera(camera_info)
+            self.camera = BaslerCamera()
             self.camera.connect()
             
             # Configure camera
-            self.statusBar().showMessage("Configuring camera...")
-            self.status_label.setText("Configuring camera...")
-            self.camera.configure(self.camera_config)
+            self.camera.configure(config)
+            self.camera_config = config
             
-            # Set camera in preview widget
-            self.preview_widget.set_camera(self.camera)
+            self.statusBar().showMessage("Camera connected successfully")
+            self.start_button.setEnabled(True)
             
-            self.statusBar().showMessage("Camera ready")
-            self.status_label.setText("Camera ready - Click 'Start Preview' to begin")
-            self.preview_button.setEnabled(True)
+            return True
             
         except CameraNotFoundError as e:
-            self.statusBar().showMessage("Camera not found")
-            self.status_label.setText("Camera not found")
-            QMessageBox.warning(
+            QMessageBox.critical(
                 self,
                 "Camera Not Found",
-                f"No camera detected.\n\n{str(e)}\n\n"
-                "Please ensure:\n"
-                "1. Basler camera is connected via USB\n"
+                f"No camera detected.\n\n{str(e)}\n\nPlease ensure:\n"
+                "1. Camera is connected via USB\n"
                 "2. Basler Pylon SDK is installed\n"
                 "3. Camera drivers are installed"
             )
-            self.preview_button.setEnabled(False)
+            self.statusBar().showMessage("Camera not found")
+            return False
             
-        except (CameraConnectionError, CameraInitializationError) as e:
-            self.statusBar().showMessage("Camera connection failed")
-            self.status_label.setText("Camera connection failed")
+        except CameraConnectionError as e:
             QMessageBox.critical(
                 self,
-                "Camera Connection Error",
-                f"Failed to connect to camera:\n\n{str(e)}"
+                "Connection Error",
+                f"Failed to connect to camera.\n\n{str(e)}"
             )
-            self.preview_button.setEnabled(False)
+            self.statusBar().showMessage("Connection failed")
+            return False
             
         except Exception as e:
-            self.statusBar().showMessage("Initialization error")
-            self.status_label.setText("Initialization error")
             QMessageBox.critical(
                 self,
-                "Initialization Error",
-                f"An error occurred during initialization:\n\n{str(e)}"
+                "Error",
+                f"Unexpected error during camera initialization.\n\n{str(e)}"
             )
-            self.preview_button.setEnabled(False)
+            self.statusBar().showMessage("Initialization error")
+            return False
     
-    @pyqtSlot()
-    def toggle_preview(self):
-        """Toggle preview on/off."""
-        if self.preview_widget.is_previewing:
-            self.stop_preview()
-        else:
-            self.start_preview()
-    
-    def start_preview(self):
+    def start_preview(self) -> None:
         """Start camera preview."""
-        success = self.preview_widget.start_preview()
-        if success:
-            self.preview_button.setText("Stop Preview")
-            self.statusBar().showMessage("Preview active")
-            self.status_label.setText("Preview active")
-        else:
-            # Error message already shown via signal
-            self.preview_button.setText("Start Preview")
+        if not self.camera or not self.camera.is_connected:
+            QMessageBox.warning(
+                self,
+                "Camera Not Ready",
+                "Camera is not connected. Please initialize camera first."
+            )
+            return
+        
+        try:
+            self.camera.start_grabbing()
+            self.preview_timer.start()
+            
+            self.start_button.setEnabled(False)
+            self.stop_button.setEnabled(True)
+            self.capture_button.setEnabled(True)
+            
+            self.statusBar().showMessage("Preview running...")
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to start preview.\n\n{str(e)}"
+            )
+            self.statusBar().showMessage("Preview start failed")
     
-    def stop_preview(self):
+    def stop_preview(self) -> None:
         """Stop camera preview."""
-        self.preview_widget.stop_preview()
-        self.preview_button.setText("Start Preview")
+        if self.preview_timer:
+            self.preview_timer.stop()
+        
+        if self.camera:
+            try:
+                self.camera.stop_grabbing()
+            except Exception:
+                pass
+        
+        self.preview_widget.clear_display()
+        
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.capture_button.setEnabled(False)
+        
         self.statusBar().showMessage("Preview stopped")
-        self.status_label.setText("Preview stopped")
     
-    @pyqtSlot(str)
-    def on_camera_error(self, error_message: str):
-        """Handle camera errors from preview widget."""
-        self.statusBar().showMessage(f"Error: {error_message}")
-        self.status_label.setText(f"Error: {error_message}")
+    def update_preview(self) -> None:
+        """Update preview with latest frame."""
+        if not self.camera or not self.camera.is_grabbing:
+            return
         
-        # Only stop preview for critical errors, not for occasional frame grab failures
-        if "Failed to start preview" in error_message or "Camera not connected" in error_message:
-            if self.preview_widget.is_previewing:
-                self.stop_preview()
-    
-    def closeEvent(self, event):
-        """Handle window close event."""
-        # Stop preview
-        if self.preview_widget.is_previewing:
+        try:
+            # Grab preview frame (1920x1080)
+            frame = self.camera.grab_preview_frame(1920, 1080)
+            
+            if frame is not None:
+                self.preview_widget.display_frame(frame)
+            else:
+                # Frame grab failed, but don't show error for every failed frame
+                pass
+                
+        except CameraGrabError:
+            # Handle grab errors silently during preview
+            pass
+        except Exception:
+            # Other errors - stop preview
             self.stop_preview()
+            QMessageBox.warning(
+                self,
+                "Preview Error",
+                "An error occurred during preview. Preview stopped."
+            )
+    
+    def capture_image(self) -> None:
+        """Capture a full-resolution image."""
+        if not self.camera or not self.camera.is_connected:
+            QMessageBox.warning(
+                self,
+                "Camera Not Ready",
+                "Camera is not connected."
+            )
+            return
         
-        # Disconnect camera
+        try:
+            self.statusBar().showMessage("Capturing image...")
+            
+            # Grab full resolution frame
+            frame = self.camera.grab_frame()
+            
+            if frame is not None:
+                self.statusBar().showMessage(
+                    f"Image captured! Shape: {frame.shape[1]}x{frame.shape[0]}"
+                )
+                # TODO: Save image to file
+                QMessageBox.information(
+                    self,
+                    "Capture Success",
+                    f"Image captured successfully!\n\n"
+                    f"Resolution: {frame.shape[1]}x{frame.shape[0]}\n"
+                    f"Channels: {frame.shape[2] if len(frame.shape) > 2 else 1}"
+                )
+            else:
+                self.statusBar().showMessage("Capture failed")
+                QMessageBox.warning(
+                    self,
+                    "Capture Failed",
+                    "Failed to capture image. Please try again."
+                )
+                
+        except CameraGrabError as e:
+            QMessageBox.warning(
+                self,
+                "Capture Error",
+                f"Failed to capture image.\n\n{str(e)}"
+            )
+            self.statusBar().showMessage("Capture error")
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Unexpected error during capture.\n\n{str(e)}"
+            )
+            self.statusBar().showMessage("Capture error")
+    
+    def closeEvent(self, event) -> None:
+        """Handle window close event."""
+        self.stop_preview()
+        
         if self.camera:
             try:
                 self.camera.disconnect()
             except Exception:
-                pass  # Ignore errors during cleanup
+                pass
         
         event.accept()

@@ -4,26 +4,22 @@ Preview widget for displaying camera feed.
 
 from typing import Optional
 import numpy as np
-import cv2
 from PyQt6.QtWidgets import QWidget, QLabel
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
-from dental_imaging.hardware.camera import BaslerCamera
-from dental_imaging.exceptions import CameraConnectionError, CameraGrabError
+import cv2
 
 
-class PreviewWidget(QWidget):
+class PreviewWidget(QLabel):
     """
-    Widget for displaying live camera preview.
+    Widget for displaying camera preview frames.
     
-    This widget handles frame grabbing and display updates.
+    This widget automatically scales and displays camera frames
+    while maintaining aspect ratio.
     """
     
-    # Signal emitted when frame is updated
-    frame_updated = pyqtSignal()
-    
-    # Signal emitted on camera errors
-    camera_error = pyqtSignal(str)
+    # Signal emitted when frame is displayed
+    frame_displayed = pyqtSignal()
     
     def __init__(self, parent: Optional[QWidget] = None):
         """
@@ -34,179 +30,63 @@ class PreviewWidget(QWidget):
         """
         super().__init__(parent)
         
-        self.camera: Optional[BaslerCamera] = None
-        self.preview_width = 1920
-        self.preview_height = 1080
-        self.update_interval_ms = 33  # ~30 FPS
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("background-color: black;")
+        self.setText("No camera feed")
         
-        # Setup UI
-        self.setup_ui()
+        self.current_frame: Optional[np.ndarray] = None
+        self._aspect_ratio: float = 16.0 / 9.0  # Default aspect ratio
         
-        # Timer for frame updates
-        self.update_timer = QTimer(self)
-        self.update_timer.timeout.connect(self.update_frame)
-        
-        self.is_previewing = False
-    
-    def setup_ui(self):
-        """Setup the UI components."""
-        # Create label for displaying image
-        self.image_label = QLabel(self)
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setStyleSheet("background-color: black;")
-        self.image_label.setText("No camera feed")
-        
-        # Set minimum size
-        self.setMinimumSize(640, 480)
-    
-    def set_camera(self, camera: BaslerCamera):
+    def display_frame(self, frame: Optional[np.ndarray]) -> None:
         """
-        Set the camera to use for preview.
+        Display a camera frame.
         
         Args:
-            camera: BaslerCamera instance
+            frame: numpy array (BGR format) or None to clear display
         """
-        self.camera = camera
-    
-    def set_preview_size(self, width: int, height: int):
-        """
-        Set preview resolution.
-        
-        Args:
-            width: Preview width
-            height: Preview height
-        """
-        self.preview_width = width
-        self.preview_height = height
-    
-    def start_preview(self):
-        """Start the preview stream."""
-        if not self.camera:
-            self.camera_error.emit("No camera set")
-            return False
-        
-        if not self.camera.is_connected:
-            self.camera_error.emit("Camera not connected")
-            return False
-        
-        try:
-            # Start continuous grabbing
-            if not self.camera.is_grabbing:
-                self.camera.start_grabbing()
-            
-            # Start update timer
-            self.update_timer.start(self.update_interval_ms)
-            self.is_previewing = True
-            return True
-            
-        except Exception as e:
-            self.is_previewing = False
-            self.camera_error.emit(f"Failed to start preview: {str(e)}")
-            return False
-    
-    def stop_preview(self):
-        """Stop the preview stream."""
-        self.update_timer.stop()
-        self.is_previewing = False
-        
-        if self.camera and self.camera.is_grabbing:
-            self.camera.stop_grabbing()
-    
-    def update_frame(self):
-        """
-        Update the preview frame.
-        Called by the timer at regular intervals.
-        """
-        if not self.camera or not self.camera.is_connected:
+        if frame is None:
+            self.setText("No frame available")
+            self.current_frame = None
             return
         
-        if not self.is_previewing:
-            return
+        self.current_frame = frame
+        height, width = frame.shape[:2]
+        self._aspect_ratio = width / height
         
-        try:
-            # Grab preview frame
-            frame = self.camera.grab_preview_frame(
-                self.preview_width,
-                self.preview_height
-            )
-            
-            if frame is not None and frame.size > 0:
-                self.display_frame(frame)
-                self.frame_updated.emit()
-            # If frame is None, just skip this update (don't emit error for occasional missed frames)
-                
-        except CameraGrabError as e:
-            # Only emit error if we're still previewing (avoid spam)
-            if self.is_previewing:
-                self.camera_error.emit(f"Frame grab error: {str(e)}")
-        except Exception as e:
-            # Only emit error if we're still previewing
-            if self.is_previewing:
-                self.camera_error.emit(f"Preview error: {str(e)}")
+        # Convert BGR to RGB for QImage
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Create QImage from numpy array
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+        qt_image = QImage(
+            rgb_frame.data,
+            w,
+            h,
+            bytes_per_line,
+            QImage.Format.Format_RGB888
+        )
+        
+        # Scale pixmap to fit widget while maintaining aspect ratio
+        pixmap = QPixmap.fromImage(qt_image)
+        scaled_pixmap = pixmap.scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        
+        self.setPixmap(scaled_pixmap)
+        self.frame_displayed.emit()
     
-    def display_frame(self, frame: np.ndarray):
-        """
-        Display a frame in the widget.
-        
-        Args:
-            frame: numpy array (BGR format)
-        """
-        if frame is None or frame.size == 0:
-            return
-        
-        try:
-            # Ensure frame is contiguous and correct format
-            if not frame.flags['C_CONTIGUOUS']:
-                frame = np.ascontiguousarray(frame)
-            
-            # Convert numpy array to QImage
-            height, width = frame.shape[:2]
-            
-            # Convert BGR to RGB for Qt
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Ensure RGB frame is contiguous
-            if not rgb_frame.flags['C_CONTIGUOUS']:
-                rgb_frame = np.ascontiguousarray(rgb_frame)
-            
-            bytes_per_line = 3 * width
-            
-            # Create QImage (Qt will copy the data)
-            q_image = QImage(
-                rgb_frame.data,
-                width,
-                height,
-                bytes_per_line,
-                QImage.Format.Format_RGB888
-            )
-            
-            # Convert to QPixmap and scale to fit label
-            pixmap = QPixmap.fromImage(q_image)
-            
-            # Scale pixmap to fit label while maintaining aspect ratio
-            label_size = self.image_label.size()
-            if label_size.width() > 0 and label_size.height() > 0:
-                scaled_pixmap = pixmap.scaled(
-                    label_size,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.image_label.setPixmap(scaled_pixmap)
-            else:
-                # Label not sized yet, just set the pixmap
-                self.image_label.setPixmap(pixmap)
-                
-        except Exception as e:
-            # Silently handle display errors to avoid spam
-            print(f"Display frame error: {e}")
+    def clear_display(self) -> None:
+        """Clear the display."""
+        self.setText("No camera feed")
+        self.current_frame = None
+        self.setPixmap(QPixmap())
     
-    def resizeEvent(self, event):
-        """Handle widget resize."""
+    def resizeEvent(self, event) -> None:
+        """Handle widget resize to update frame display."""
         super().resizeEvent(event)
-        # Resize image label to fill widget
-        self.image_label.setGeometry(0, 0, self.width(), self.height())
-    
-    def closeEvent(self, event):
-        """Handle widget close."""
-        self.stop_preview()
-        super().closeEvent(event)
+        # Redisplay current frame if available
+        if self.current_frame is not None:
+            self.display_frame(self.current_frame)
