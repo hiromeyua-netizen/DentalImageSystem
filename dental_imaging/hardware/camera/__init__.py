@@ -7,6 +7,7 @@ from dental_imaging.hardware.camera.camera_detection import (
     get_camera_count,
     CameraInfo,
 )
+from dental_imaging.hardware.camera.basler_camera import BaslerCamera
 
 __all__ = [
     "detect_cameras",
@@ -14,4 +15,5 @@ __all__ = [
     "get_first_available_camera",
     "get_camera_count",
     "CameraInfo",
+    "BaslerCamera",
 ]
