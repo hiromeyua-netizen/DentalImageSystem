@@ -104,6 +104,8 @@ class ClinicalSettingsPanel(QFrame):
         super().__init__(parent)
         self._app_name = app_name
         self._app_version = app_version
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
 
         self.setObjectName("ClinicalSettingsPanel")
         self.setStyleSheet(

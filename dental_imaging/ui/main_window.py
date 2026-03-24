@@ -199,11 +199,19 @@ class MainWindow(QMainWindow):
         sp.sd_card_requested.connect(self._on_sd_card_stub)
 
     def _on_settings_toggled(self, open_: bool) -> None:
+        rail = self._clinical.right_rail()
         if open_:
+            # Avoid overlay stacking artifacts: Settings and Image Settings should not be open together.
+            img_btn = rail.image_settings_button()
+            if img_btn.isChecked():
+                img_btn.setChecked(False)
+            self.image_settings.hide()
             self._sync_settings_panel_from_state()
             self._settings_panel.show()
         else:
             self._settings_panel.hide()
+            if rail.image_settings_button().isChecked():
+                self.image_settings.show()
         self._clinical.layout_chrome()
 
     def _close_settings_panel(self) -> None:
