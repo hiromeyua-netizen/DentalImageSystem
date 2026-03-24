@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QFrame,
@@ -168,9 +168,9 @@ class RightToolRail(QFrame):
                 border-radius: 6px;
                 color: #fff;
                 font-size: 16px;
-                padding: 6px;
-                min-width: 36px;
-                min-height: 32px;
+                padding: 8px;
+                min-width: 44px;
+                min-height: 40px;
             }}
             QToolButton:hover {{ background-color: rgba(255,255,255,0.14); }}
             QToolButton:checked {{ background-color: rgba(80, 140, 220, 0.35); }}
@@ -294,24 +294,24 @@ class BottomControlBar(QFrame):
             }}
             QLabel {{ {LABEL_STYLE} }}
             QSlider::groove:horizontal {{
-                height: 6px;
+                height: 8px;
                 background: rgba(255,255,255,0.15);
-                border-radius: 3px;
+                border-radius: 4px;
             }}
             QSlider::handle:horizontal {{
                 background: #fff;
-                width: 18px;
-                height: 18px;
-                margin: -7px 0;
-                border-radius: 9px;
+                width: 24px;
+                height: 24px;
+                margin: -8px 0;
+                border-radius: 12px;
             }}
             QPushButton#presetChip {{
                 background-color: rgba(255,255,255,0.1);
                 border: 1px solid rgba(255,255,255,0.2);
-                border-radius: 22px;
+                border-radius: 26px;
                 color: #fff;
-                min-width: 44px;
-                min-height: 44px;
+                min-width: 52px;
+                min-height: 52px;
                 font-weight: 600;
             }}
             QPushButton#presetChip:hover {{ background-color: rgba(255,255,255,0.18); }}
@@ -385,6 +385,8 @@ class BottomControlBar(QFrame):
         preset_row = QHBoxLayout()
         preset_row.setSpacing(10)
         self._preset_buttons = []
+        self._preset_press_timers: dict[int, QTimer] = {}
+        self._preset_longpress_fired: dict[int, bool] = {}
         for i in range(3):
             p = QPushButton(str(i + 1))
             p.setObjectName("presetChip")
@@ -393,10 +395,18 @@ class BottomControlBar(QFrame):
             p.setAutoExclusive(True)
             p.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             idx = i
-            p.clicked.connect(lambda checked=False, n=idx: self.preset_clicked.emit(n))
+            p.clicked.connect(lambda checked=False, n=idx: self._emit_preset_click_if_not_longpress(n))
             p.customContextMenuRequested.connect(
                 lambda _pos, n=idx: self.preset_save_requested.emit(n)
             )
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(700)
+            timer.timeout.connect(lambda n=idx: self._on_preset_longpress(n))
+            self._preset_press_timers[idx] = timer
+            self._preset_longpress_fired[idx] = False
+            p.pressed.connect(lambda n=idx: self._on_preset_pressed(n))
+            p.released.connect(lambda n=idx: self._on_preset_released(n))
             preset_row.addWidget(p)
             self._preset_buttons.append(p)
         preset_box.addWidget(preset_lbl)
@@ -422,6 +432,27 @@ class BottomControlBar(QFrame):
             return
         if 0 <= index < len(self._preset_buttons):
             self._preset_buttons[index].setChecked(True)
+
+    def _on_preset_pressed(self, index: int) -> None:
+        self._preset_longpress_fired[index] = False
+        t = self._preset_press_timers.get(index)
+        if t is not None:
+            t.start()
+
+    def _on_preset_released(self, index: int) -> None:
+        t = self._preset_press_timers.get(index)
+        if t is not None and t.isActive():
+            t.stop()
+
+    def _on_preset_longpress(self, index: int) -> None:
+        self._preset_longpress_fired[index] = True
+        self.preset_save_requested.emit(index)
+
+    def _emit_preset_click_if_not_longpress(self, index: int) -> None:
+        if self._preset_longpress_fired.get(index, False):
+            self._preset_longpress_fired[index] = False
+            return
+        self.preset_clicked.emit(index)
 
 
 class ClinicalViewport(QWidget):

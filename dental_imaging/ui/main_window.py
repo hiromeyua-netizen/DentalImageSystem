@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
         preset = self._presets[index]
         if not preset:
             self.statusBar().showMessage(
-                f"Preset {index + 1} is empty. Right-click to save current setup."
+                f"Preset {index + 1} is empty. Press and hold to save current setup."
             )
             return
         try:
