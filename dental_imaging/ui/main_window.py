@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self._show_preview_crosshair = False
         self._preview_auto_scale = True
         self._roi_mode_active = False
+        self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
 
         self._hidden_tuning = QWidget()
         self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
@@ -330,58 +331,28 @@ class MainWindow(QMainWindow):
         self._rotate_quarter_turns = (self._rotate_quarter_turns + 1) % 4
 
     def _stub_auto_color(self) -> None:
-        frame = None
-        if self.camera is not None and self.camera.is_grabbing:
-            try:
-                frame = self.camera.grab_preview_frame(
-                    self._preview_width, self._preview_height
-                )
-            except Exception:
-                frame = None
-        if frame is None:
-            frame = self.preview_widget.current_frame
+        frame = self.preview_widget.current_frame
         if frame is None or frame.size == 0:
-            self.statusBar().showMessage("Auto color balance: no frame available")
+            QMessageBox.information(
+                self,
+                "Auto color balance",
+                "No preview frame available yet.",
+            )
             return
-
-        roi = self.preview_widget.roi_rect()
-        sample = frame
-        if roi is not None:
-            x, y, w, h = roi
-            fh, fw = frame.shape[:2]
-            x = max(0, min(x, fw - 1))
-            y = max(0, min(y, fh - 1))
-            w = max(1, min(w, fw - x))
-            h = max(1, min(h, fh - y))
-            sample = frame[y : y + h, x : x + w]
-
-        mean_b, mean_g, mean_r = cv2.mean(sample)[:3]
-        if min(mean_b, mean_g, mean_r) <= 1e-3:
-            self.statusBar().showMessage("Auto color balance: frame too dark")
+        roi = self.preview_widget.roi_rect() if self._roi_mode_active else None
+        gains = self._estimate_auto_color_gains(frame, roi)
+        if gains is None:
+            QMessageBox.information(
+                self,
+                "Auto color balance",
+                "Could not estimate color correction from current frame.",
+            )
             return
-
-        # Gray-world style correction mapped to white-balance/tint sliders.
-        target = (mean_r + mean_g + mean_b) / 3.0
-        rb_ratio = (mean_b - mean_r) / max(1.0, (mean_b + mean_r))
-        wb_k = max(-1.0, min(1.0, rb_ratio / 0.35))
-        wb_pct = int(round(50.0 + 50.0 * wb_k))
-
-        g_factor = target / mean_g
-        tint_k = max(-1.0, min(1.0, (g_factor - 1.0) / 0.22))
-        tint_pct = int(round(50.0 + 50.0 * tint_k))
-
-        # Blend with current values for smoother behavior.
-        cur_wb = self.image_settings.slider_percent("white_balance")
-        cur_tint = self.image_settings.slider_percent("tint")
-        out_wb = int(round(cur_wb * 0.4 + wb_pct * 0.6))
-        out_tint = int(round(cur_tint * 0.4 + tint_pct * 0.6))
-
-        self.image_settings.set_slider_percent("white_balance", out_wb)
-        self.image_settings.set_slider_percent("tint", out_tint)
-        self.image_settings.set_slider_percent("warmth", 50)
+        self._auto_color_gains = gains
         self.statusBar().showMessage(
-            f"Auto color balance applied (WB {out_wb}%, Tint {out_tint}%)"
+            f"Auto color balance applied (B:{gains[0]:.2f} G:{gains[1]:.2f} R:{gains[2]:.2f})"
         )
+        self._refresh_preview_if_idle()
 
     def _stub_recenter_roi(self) -> None:
         if not self._roi_mode_active:
@@ -407,7 +378,9 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_preview_if_idle(self) -> None:
-        pass
+        if self.preview_timer is not None and self.preview_timer.isActive():
+            return
+        self._redraw_preview_if_possible()
 
     def _sync_top_chrome(self) -> None:
         """Keep top status pill, power label, and capture button aligned with camera state."""
@@ -457,6 +430,51 @@ class MainWindow(QMainWindow):
             out = cv2.rotate(out, cv2.ROTATE_90_CLOCKWISE)
         return out
 
+    def _apply_auto_color_balance(self, bgr: np.ndarray) -> np.ndarray:
+        if bgr is None or bgr.size == 0:
+            return bgr
+        gains = self._auto_color_gains
+        if np.allclose(gains, [1.0, 1.0, 1.0], atol=1e-3):
+            return bgr
+        out = bgr.astype(np.float32)
+        out[:, :, 0] *= float(gains[0])
+        out[:, :, 1] *= float(gains[1])
+        out[:, :, 2] *= float(gains[2])
+        return np.clip(out, 0, 255).astype(np.uint8)
+
+    @staticmethod
+    def _estimate_auto_color_gains(
+        bgr: np.ndarray, roi: Optional[tuple[int, int, int, int]] = None
+    ) -> Optional[np.ndarray]:
+        if bgr is None or bgr.size == 0:
+            return None
+        sample = bgr
+        if roi is not None:
+            x, y, w, h = roi
+            fh, fw = bgr.shape[:2]
+            x = max(0, min(int(x), fw - 1))
+            y = max(0, min(int(y), fh - 1))
+            w = max(1, min(int(w), fw - x))
+            h = max(1, min(int(h), fh - y))
+            sample = bgr[y : y + h, x : x + w]
+        if sample.size == 0:
+            return None
+        pixels = sample.reshape(-1, 3).astype(np.float32)
+        if pixels.shape[0] < 32:
+            return None
+        lo = np.percentile(pixels, 5.0, axis=0)
+        hi = np.percentile(pixels, 95.0, axis=0)
+        mask = np.logical_and(pixels >= lo, pixels <= hi).all(axis=1)
+        clipped = pixels[mask] if int(mask.sum()) >= 32 else pixels
+        means = clipped.mean(axis=0)
+        if np.any(means <= 1e-3):
+            return None
+        target = float(np.mean(means))
+        gains = target / means
+        gains = gains / max(1e-6, float(np.mean(gains)))
+        gains = np.clip(gains, 0.70, 1.40).astype(np.float32)
+        return gains
+
     def _update_stream_stats(self, frame_w: int, frame_h: int) -> None:
         interval_ms = max(1, self.preview_timer.interval())
         fps = 1000.0 / interval_ms
@@ -487,6 +505,7 @@ class MainWindow(QMainWindow):
         """Match previous 'all Auto on': AE, AGC, AWB, neutral sliders."""
         self._camera_auto_exposure = True
         self._camera_auto_gain = True
+        self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
         if not self.camera or not self.camera.is_connected:
             self.statusBar().showMessage("Image settings reset (connect camera to apply auto modes)")
             return
@@ -645,6 +664,7 @@ class MainWindow(QMainWindow):
             
             if frame is not None:
                 frame = self.image_settings.apply_postprocess(frame)
+                frame = self._apply_auto_color_balance(frame)
                 h, w = frame.shape[:2]
                 self._update_stream_stats(w, h)
                 frame = self._apply_view_transforms(frame)
@@ -703,6 +723,7 @@ class MainWindow(QMainWindow):
                 return
 
             frame = self.image_settings.apply_postprocess(frame)
+            frame = self._apply_auto_color_balance(frame)
             if self._export_full_resolution:
                 frame_to_save = frame
             else:
