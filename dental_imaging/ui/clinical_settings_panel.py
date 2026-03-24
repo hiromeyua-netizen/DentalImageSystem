@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSlider,
     QVBoxLayout,
 )
 
@@ -304,18 +303,6 @@ class ClinicalSettingsPanel(QFrame):
         about.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(about)
 
-        # hidden functional controls
-        self._quality_slider = QSlider(Qt.Orientation.Horizontal, self)
-        self._quality_slider.setRange(60, 100)
-        self._quality_slider.setValue(94)
-        self._quality_slider.valueChanged.connect(self._on_quality_slider)
-        self._quality_slider.hide()
-        self._led_slider = QSlider(Qt.Orientation.Horizontal, self)
-        self._led_slider.setRange(0, 100)
-        self._led_slider.setValue(50)
-        self._led_slider.valueChanged.connect(self._on_led_slider)
-        self._led_slider.hide()
-
     def _toggle_row(self, text: str, kind: str) -> QHBoxLayout:
         row = QHBoxLayout()
         row.addWidget(_label(text))
@@ -356,14 +343,6 @@ class ClinicalSettingsPanel(QFrame):
         height = max(470, min(680, int(available_height * 0.92)))
         self.setFixedWidth(width)
         self.setFixedHeight(height)
-
-    def _on_quality_slider(self, value: int) -> None:
-        self._quality_pct.setText(f"{value}%")
-        self.jpeg_quality_changed.emit(value)
-
-    def _on_led_slider(self, value: int) -> None:
-        self._led_pct.setText(f"{value}%")
-        self.led_preset_changed.emit(value)
 
     def _on_sd_toggled(self, checked: bool) -> None:
         if checked:
@@ -409,10 +388,8 @@ class ClinicalSettingsPanel(QFrame):
         self._fmt_jpg.blockSignals(False)
         self._fmt_png.blockSignals(False)
 
-        self._quality_slider.blockSignals(True)
-        self._quality_slider.setValue(jpeg_quality)
-        self._quality_slider.blockSignals(False)
         self._quality_pct.setText(f"{jpeg_quality}%")
+        self._led_pct.setText("50%")
 
         self.btn_snapshot.blockSignals(True)
         self.btn_burst.blockSignals(True)
