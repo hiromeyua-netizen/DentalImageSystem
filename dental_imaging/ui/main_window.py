@@ -4,22 +4,21 @@ Main application window.
 
 from typing import Optional
 
+import cv2
+import numpy as np
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
     QStatusBar,
     QMessageBox,
-    QLabel,
     QSlider,
     QDoubleSpinBox,
-    QGroupBox,
-    QGridLayout,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
+from dental_imaging.ui.clinical_shell import ClinicalViewport
+from dental_imaging.ui.camera_settings_dialog import CameraSettingsDialog
 from dental_imaging.ui.widgets.preview_widget import PreviewWidget
 from dental_imaging.hardware.camera import BaslerCamera
 from dental_imaging.models.camera_config import CameraConfig
@@ -39,7 +38,6 @@ from dental_imaging.storage.snapshot_writer import SnapshotWriter
 from dental_imaging.hardware.camera.camera_settings_helper import print_camera_settings
 from dental_imaging.hardware.camera.focus_helper import diagnose_blur_issues
 from dental_imaging.ui.widgets.image_settings_component import ImageSettingsComponent
-from dental_imaging.ui.widgets.preview_stack import PreviewStack
 
 
 class MainWindow(QMainWindow):
@@ -79,26 +77,38 @@ class MainWindow(QMainWindow):
         # After Reset, or while camera reports AE/AGC, we skip pushing manual slider values.
         self._camera_auto_exposure = True
         self._camera_auto_gain = True
+        self._flip_h = False
+        self._flip_v = False
+        self._rotate_quarter_turns = 0  # 0–3 clockwise steps
+
+        self._hidden_tuning = QWidget()
+        self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
+        self.frame_rate_spinbox.setRange(1.0, 60.0)
+        self.frame_rate_spinbox.setValue(30.0)
+        self.frame_rate_spinbox.setSuffix(" fps")
+        self.frame_rate_spinbox.setDecimals(1)
+        self.frame_rate_spinbox.setSingleStep(1.0)
+        self.gamma_slider = QSlider(Qt.Orientation.Horizontal, self._hidden_tuning)
+        self.gamma_slider.setRange(50, 300)
+        self.gamma_slider.setValue(100)
+        self.gamma_spinbox = QDoubleSpinBox(self._hidden_tuning)
+        self.gamma_spinbox.setRange(0.5, 3.0)
+        self.gamma_spinbox.setValue(1.0)
+        self.gamma_spinbox.setSingleStep(0.1)
+        self.gamma_spinbox.setDecimals(2)
 
         self._setup_ui()
         self._setup_timers()
         
     def _setup_ui(self) -> None:
-        """Set up the user interface."""
-        self.setWindowTitle(
-            f"{self._app_settings.application.name} — Camera"
-        )
+        """Kiosk-style layout: full-screen live view + top / right / bottom chrome."""
+        self.setWindowTitle(f"{self._app_settings.application.name} — Camera")
         self.setMinimumSize(1280, 720)
-        
-        # Central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Main layout
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
-        
+
+        brand = self._app_settings.application.name.upper().replace(" ", "\n", 1)
+        if "\n" not in brand:
+            brand = self._app_settings.application.name.upper()
+
         self.preview_widget = PreviewWidget()
         self.image_settings.settings_changed.connect(
             self._on_image_settings_hardware_push
@@ -112,83 +122,40 @@ class MainWindow(QMainWindow):
         self.image_settings.gain_slider_user_changed.connect(
             self._on_gain_slider_manual
         )
-        self._preview_stack = PreviewStack(
+
+        self._clinical = ClinicalViewport(
             self.preview_widget,
             self.image_settings,
+            brand_title=brand,
         )
-        main_layout.addWidget(self._preview_stack, stretch=1)
+        self.setCentralWidget(self._clinical)
 
-        advanced = QGroupBox("Camera")
-        adv_layout = QGridLayout()
-        advanced.setLayout(adv_layout)
-
-        adv_layout.addWidget(QLabel("Frame rate:"), 0, 0)
-        self.frame_rate_spinbox = QDoubleSpinBox()
-        self.frame_rate_spinbox.setRange(1.0, 60.0)
-        self.frame_rate_spinbox.setValue(30.0)
-        self.frame_rate_spinbox.setSuffix(" fps")
-        self.frame_rate_spinbox.setSingleStep(1.0)
-        self.frame_rate_spinbox.setDecimals(1)
         self.frame_rate_spinbox.valueChanged.connect(self.on_frame_rate_changed)
-        adv_layout.addWidget(self.frame_rate_spinbox, 0, 1)
-
-        adv_layout.addWidget(QLabel("Gamma:"), 0, 2)
-        self.gamma_slider = QSlider(Qt.Orientation.Horizontal)
-        self.gamma_slider.setRange(50, 300)
-        self.gamma_slider.setValue(100)
         self.gamma_slider.valueChanged.connect(self.on_gamma_changed)
-        adv_layout.addWidget(self.gamma_slider, 0, 3)
-
-        self.gamma_spinbox = QDoubleSpinBox()
-        self.gamma_spinbox.setRange(0.5, 3.0)
-        self.gamma_spinbox.setValue(1.0)
-        self.gamma_spinbox.setSingleStep(0.1)
-        self.gamma_spinbox.setDecimals(2)
         self.gamma_spinbox.valueChanged.connect(self.on_gamma_spinbox_changed)
-        adv_layout.addWidget(self.gamma_spinbox, 0, 4)
 
-        main_layout.addWidget(advanced)
-        
-        # Control buttons
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
+        rail = self._clinical.right_rail()
+        self.image_settings.wire_toggle_button(rail.image_settings_button())
+        rail.capture_clicked.connect(self.capture_image)
+        rail.settings_clicked.connect(self._open_camera_settings_dialog)
+        self._clinical.top_bar().power_clicked.connect(self._on_power_clicked)
 
-        self.image_settings_button = QPushButton("Image Settings")
-        self.image_settings_button.setCheckable(True)
-        self.image_settings_button.setChecked(True)
-        button_layout.addWidget(self.image_settings_button)
-        self.image_settings.wire_toggle_button(self.image_settings_button)
-        
-        self.start_button = QPushButton("Start Preview")
-        self.start_button.clicked.connect(self.start_preview)
-        button_layout.addWidget(self.start_button)
-        
-        self.stop_button = QPushButton("Stop Preview")
-        self.stop_button.clicked.connect(self.stop_preview)
-        self.stop_button.setEnabled(False)
-        button_layout.addWidget(self.stop_button)
-        
-        self.capture_button = QPushButton("Capture")
-        self.capture_button.clicked.connect(self.capture_image)
-        self.capture_button.setEnabled(False)
-        button_layout.addWidget(self.capture_button)
-        
-        self.diagnose_button = QPushButton("Diagnose Blur")
-        self.diagnose_button.clicked.connect(self.diagnose_blur)
-        button_layout.addWidget(self.diagnose_button)
+        rail.flip_horizontal_clicked.connect(self._toggle_flip_h)
+        rail.flip_vertical_clicked.connect(self._toggle_flip_v)
+        rail.rotate_ccw_clicked.connect(self._rotate_ccw)
+        rail.rotate_cw_clicked.connect(self._rotate_cw)
+        rail.auto_color_clicked.connect(self._stub_auto_color)
+        rail.recenter_roi_clicked.connect(self._stub_recenter_roi)
+        rail.roi_mode_clicked.connect(self._stub_roi_mode)
 
-        self.reconnect_button = QPushButton("Reconnect Camera")
-        self.reconnect_button.clicked.connect(self.reconnect_camera)
-        self.reconnect_button.setEnabled(False)
-        button_layout.addWidget(self.reconnect_button)
-        
-        button_layout.addStretch()
-        main_layout.addLayout(button_layout)
-        
-        # Flag to prevent recursive updates
+        bb = self._clinical.bottom_bar()
+        bb.brightness_changed.connect(lambda _v: self._refresh_preview_if_idle())
+        bb.zoom_changed.connect(lambda _v: self._refresh_preview_if_idle())
+        bb.preset_clicked.connect(self._on_preset_clicked)
+
+        self._sync_top_chrome()
+
         self._updating_settings = False
-        
-        # Status bar
         self.statusBar().showMessage("Ready")
         
     def _setup_timers(self) -> None:
@@ -197,6 +164,158 @@ class MainWindow(QMainWindow):
         self.preview_timer.timeout.connect(self.update_preview)
         fps = max(1.0, float(self._app_settings.preview.fps))
         self.preview_timer.setInterval(max(1, int(round(1000.0 / fps))))
+
+    def _open_camera_settings_dialog(self) -> None:
+        dlg = CameraSettingsDialog(self)
+        dlg.frame_rate_spinbox.setValue(self.frame_rate_spinbox.value())
+        dlg.gamma_slider.setValue(self.gamma_slider.value())
+        dlg.gamma_spinbox.setValue(self.gamma_spinbox.value())
+
+        def sync_fps(v: float) -> None:
+            self.frame_rate_spinbox.blockSignals(True)
+            self.frame_rate_spinbox.setValue(v)
+            self.frame_rate_spinbox.blockSignals(False)
+            self.on_frame_rate_changed(v)
+
+        def sync_gamma_slider(v: int) -> None:
+            self.gamma_slider.blockSignals(True)
+            self.gamma_slider.setValue(v)
+            self.gamma_slider.blockSignals(False)
+            self.on_gamma_changed(v)
+
+        def sync_gamma_spin(v: float) -> None:
+            self.gamma_spinbox.blockSignals(True)
+            self.gamma_spinbox.setValue(v)
+            self.gamma_spinbox.blockSignals(False)
+            self.on_gamma_spinbox_changed(v)
+
+        dlg.frame_rate_spinbox.valueChanged.connect(sync_fps)
+        dlg.gamma_slider.valueChanged.connect(sync_gamma_slider)
+        dlg.gamma_spinbox.valueChanged.connect(sync_gamma_spin)
+        dlg.start_preview_btn.clicked.connect(self.start_preview)
+        dlg.stop_preview_btn.clicked.connect(self.stop_preview)
+        dlg.diagnose_btn.clicked.connect(self.diagnose_blur)
+        dlg.reconnect_btn.clicked.connect(self.reconnect_camera)
+        dlg.exec()
+
+    def _on_power_clicked(self) -> None:
+        if self.camera is not None and self.camera.is_connected:
+            self.stop_preview()
+            try:
+                self.camera.disconnect()
+            except Exception:
+                pass
+            self.camera = None
+            self._sync_top_chrome()
+            self.statusBar().showMessage("Camera disconnected")
+            return
+        if self.camera_config:
+            if self.initialize_camera(self.camera_config):
+                self.start_preview()
+            self._sync_top_chrome()
+        else:
+            QMessageBox.information(
+                self,
+                "Camera",
+                "No camera configuration loaded.",
+            )
+
+    def _toggle_flip_h(self) -> None:
+        self._flip_h = not self._flip_h
+
+    def _toggle_flip_v(self) -> None:
+        self._flip_v = not self._flip_v
+
+    def _rotate_ccw(self) -> None:
+        self._rotate_quarter_turns = (self._rotate_quarter_turns - 1) % 4
+
+    def _rotate_cw(self) -> None:
+        self._rotate_quarter_turns = (self._rotate_quarter_turns + 1) % 4
+
+    def _stub_auto_color(self) -> None:
+        QMessageBox.information(
+            self,
+            "Auto color balance",
+            "This tool will be available in a future update.",
+        )
+
+    def _stub_recenter_roi(self) -> None:
+        QMessageBox.information(
+            self,
+            "Recenter ROI",
+            "This tool will be available in a future update.",
+        )
+
+    def _stub_roi_mode(self) -> None:
+        QMessageBox.information(
+            self,
+            "ROI mode",
+            "This tool will be available in a future update.",
+        )
+
+    def _on_preset_clicked(self, index: int) -> None:
+        QMessageBox.information(
+            self,
+            "Presets",
+            f"Preset {index + 1} will be configurable in a future update.",
+        )
+
+    def _refresh_preview_if_idle(self) -> None:
+        pass
+
+    def _sync_top_chrome(self) -> None:
+        """Keep top status pill, power label, and capture button aligned with camera state."""
+        c = self.camera
+        connected = c is not None and c.is_connected
+        grabbing = connected and c.is_grabbing
+        self._clinical.top_bar().set_connected(connected)
+        self._clinical.top_bar().set_power_primary_text(
+            "Power Off" if connected else "Connect"
+        )
+        self._clinical.right_rail().set_capture_enabled(grabbing)
+
+    @staticmethod
+    def _zoom_crop(bgr: np.ndarray, pct: int) -> np.ndarray:
+        if pct <= 2 or bgr is None or bgr.size == 0:
+            return bgr
+        fh, fw = bgr.shape[:2]
+        t = pct / 100.0
+        cw = max(32, int(fw * (1.0 - 0.7 * t)))
+        ch = max(32, int(fh * (1.0 - 0.7 * t)))
+        cw = min(cw, fw)
+        ch = min(ch, fh)
+        x0 = (fw - cw) // 2
+        y0 = (fh - ch) // 2
+        return bgr[y0 : y0 + ch, x0 : x0 + cw].copy()
+
+    @staticmethod
+    def _brightness_adjust(bgr: np.ndarray, pct: int) -> np.ndarray:
+        if bgr is None or bgr.size == 0:
+            return bgr
+        alpha = max(0.2, min(1.8, 0.2 + 1.6 * (pct / 100.0)))
+        beta = (pct - 50.0) * 2.0
+        return cv2.convertScaleAbs(bgr, alpha=alpha, beta=beta)
+
+    def _apply_view_transforms(self, bgr: np.ndarray) -> np.ndarray:
+        if bgr is None or bgr.size == 0:
+            return bgr
+        z = self._clinical.bottom_bar().zoom_percent()
+        br = self._clinical.bottom_bar().brightness_percent()
+        out = self._zoom_crop(bgr, z)
+        out = self._brightness_adjust(out, br)
+        if self._flip_h:
+            out = cv2.flip(out, 1)
+        if self._flip_v:
+            out = cv2.flip(out, 0)
+        for _ in range(self._rotate_quarter_turns % 4):
+            out = cv2.rotate(out, cv2.ROTATE_90_CLOCKWISE)
+        return out
+
+    def _update_stream_stats(self, frame_w: int, frame_h: int) -> None:
+        interval_ms = max(1, self.preview_timer.interval())
+        fps = 1000.0 / interval_ms
+        mbps = (frame_w * frame_h * 3.0 * fps) / 1_000_000.0
+        self._clinical.top_bar().set_stats_text(frame_w, frame_h, fps, mbps)
 
     def _on_image_settings_hardware_push(self) -> None:
         """Apply exposure/gain sliders when those channels are in manual mode."""
@@ -273,9 +392,8 @@ class MainWindow(QMainWindow):
             print_camera_settings(self.camera)
             
             self.statusBar().showMessage("Camera connected successfully")
-            self.start_button.setEnabled(True)
-            self.reconnect_button.setEnabled(True)
-            
+            self._sync_top_chrome()
+
             return True
             
         except CameraNotFoundError as e:
@@ -338,11 +456,9 @@ class MainWindow(QMainWindow):
         try:
             self.camera.start_grabbing()
             self.preview_timer.start()
-            
-            self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-            self.capture_button.setEnabled(True)
-            
+
+            self._sync_top_chrome()
+
             self.statusBar().showMessage("Preview running...")
             
         except Exception as e:
@@ -365,11 +481,9 @@ class MainWindow(QMainWindow):
                 pass
         
         self.preview_widget.clear_display()
-        
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.capture_button.setEnabled(False)
-        
+
+        self._sync_top_chrome()
+
         self.statusBar().showMessage("Preview stopped")
     
     def update_preview(self) -> None:
@@ -385,6 +499,9 @@ class MainWindow(QMainWindow):
             
             if frame is not None:
                 frame = self.image_settings.apply_postprocess(frame)
+                h, w = frame.shape[:2]
+                self._update_stream_stats(w, h)
+                frame = self._apply_view_transforms(frame)
                 self.preview_widget.display_frame(frame)
             else:
                 # Frame grab failed, but don't show error for every failed frame
@@ -434,6 +551,7 @@ class MainWindow(QMainWindow):
                 return
 
             frame = self.image_settings.apply_postprocess(frame)
+            frame = self._apply_view_transforms(frame)
 
             result = self._snapshot_writer.save_bgr(frame, prefix="capture")
             self.statusBar().showMessage(f"Saved: {result.path.name}")
@@ -501,12 +619,13 @@ class MainWindow(QMainWindow):
                 pass
             self.camera = None
 
-        self.start_button.setEnabled(False)
-        self.reconnect_button.setEnabled(False)
+        self._sync_top_chrome()
         self.statusBar().showMessage("Reconnecting…")
 
         if self.initialize_camera(self.camera_config) and was_preview:
             self.start_preview()
+        else:
+            self._sync_top_chrome()
     
     def _update_settings_ui(self) -> None:
         """Update UI controls with current camera settings."""
