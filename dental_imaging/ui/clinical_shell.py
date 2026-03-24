@@ -476,8 +476,13 @@ class ClinicalViewport(QWidget):
             y = max(th + margin, h - bh - ph - margin)
         panel.move(x, y)
 
+        settings_visible = self._settings is not None and self._settings.isVisible()
+        if settings_visible:
+            # Never stack both floating panels; this causes visual artifacts.
+            self._overlay.hide()
+
         if self._settings is not None and self._settings.isVisible():
-            margin_s = 12
+            margin_s = 14
             avail_h = max(200, preview_h - 2 * margin_s)
             if hasattr(self._settings, "set_responsive_metrics"):
                 self._settings.set_responsive_metrics(w - rw - 2 * margin_s, preview_h)
@@ -487,13 +492,14 @@ class ClinicalViewport(QWidget):
             sh = min(self._settings.sizeHint().height(), avail_h)
             self._settings.resize(sw, sh)
             sx = max(margin_s, w - rw - sw - margin_s)
-            sy = th + margin_s + max(0, (preview_h - sh) // 2)
+            # Anchor below top bar for stable header visibility (no clipping).
+            sy = th + margin_s
             if sy + sh > h - bh - margin_s:
                 sy = max(th + margin_s, h - bh - sh - margin_s)
             self._settings.move(sx, sy)
             self._settings.raise_()
-
-        self._overlay.raise_()
+        if not settings_visible and self._overlay.isVisible():
+            self._overlay.raise_()
         if self._settings is not None and self._settings.isVisible():
             self._settings.raise_()
         self._top.raise_()
