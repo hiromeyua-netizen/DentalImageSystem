@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self._show_preview_crosshair = False
         self._preview_auto_scale = True
         self._roi_mode_active = False
+        self._auto_color_balance_enabled = False
         self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)  # B, G, R
 
         self._hidden_tuning = QWidget()
@@ -164,9 +165,9 @@ class MainWindow(QMainWindow):
         rail.flip_vertical_clicked.connect(self._toggle_flip_v)
         rail.rotate_ccw_clicked.connect(self._rotate_ccw)
         rail.rotate_cw_clicked.connect(self._rotate_cw)
-        rail.auto_color_clicked.connect(self._on_auto_color_balance)
+        rail.auto_color_toggled.connect(self._on_auto_color_toggled)
         rail.recenter_roi_clicked.connect(self._stub_recenter_roi)
-        rail.roi_mode_clicked.connect(self._stub_roi_mode)
+        rail.roi_mode_toggled.connect(self._stub_roi_mode)
 
         bb = self._clinical.bottom_bar()
         bb.brightness_changed.connect(lambda _v: self._refresh_preview_if_idle())
@@ -330,10 +331,25 @@ class MainWindow(QMainWindow):
     def _rotate_cw(self) -> None:
         self._rotate_quarter_turns = (self._rotate_quarter_turns + 1) % 4
 
-    def _on_auto_color_balance(self) -> None:
+    def _on_auto_color_toggled(self, enabled: bool) -> None:
+        self._auto_color_balance_enabled = bool(enabled)
+        if not self._auto_color_balance_enabled:
+            self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+            self.statusBar().showMessage("Auto color balance disabled")
+            if self.camera is not None and self.camera.is_grabbing:
+                self.update_preview()
+            else:
+                self._redraw_preview_if_possible()
+            return
+        self._recalculate_auto_color_balance(show_status=True)
+
+    def _recalculate_auto_color_balance(self, *, show_status: bool = False) -> None:
         frame = self.preview_widget.current_frame
         if frame is None or frame.size == 0:
-            self.statusBar().showMessage("Auto color balance: no preview frame available")
+            if show_status:
+                self.statusBar().showMessage(
+                    "Auto color balance: no preview frame available"
+                )
             return
 
         sample = frame
@@ -351,15 +367,16 @@ class MainWindow(QMainWindow):
                 sample = crop
                 source = "ROI"
 
-        self._auto_color_gains = self._compute_auto_color_gains(sample)
-        self.statusBar().showMessage(
-            f"Auto color balance applied ({source}) — "
-            f"B:{self._auto_color_gains[0]:.2f} G:{self._auto_color_gains[1]:.2f} R:{self._auto_color_gains[2]:.2f}"
-        )
-        if self.camera is not None and self.camera.is_grabbing:
-            self.update_preview()
-        else:
-            self._redraw_preview_if_possible()
+        target_gains = self._compute_auto_color_gains(sample)
+        # Smooth gain updates to avoid visible jumps in live preview.
+        self._auto_color_gains = (
+            0.8 * self._auto_color_gains + 0.2 * target_gains
+        ).astype(np.float32)
+        if show_status:
+            self.statusBar().showMessage(
+                f"Auto color balance enabled ({source}) — "
+                f"B:{self._auto_color_gains[0]:.2f} G:{self._auto_color_gains[1]:.2f} R:{self._auto_color_gains[2]:.2f}"
+            )
 
     def _stub_recenter_roi(self) -> None:
         if not self._roi_mode_active:
@@ -368,8 +385,8 @@ class MainWindow(QMainWindow):
         self.preview_widget.recenter_roi()
         self.statusBar().showMessage("ROI recentered")
 
-    def _stub_roi_mode(self) -> None:
-        self._roi_mode_active = not self._roi_mode_active
+    def _stub_roi_mode(self, enabled: bool) -> None:
+        self._roi_mode_active = bool(enabled)
         self.preview_widget.set_roi_mode(self._roi_mode_active)
         self.statusBar().showMessage(
             "ROI mode enabled - drag to draw/edit box"
@@ -661,6 +678,8 @@ class MainWindow(QMainWindow):
             
             if frame is not None:
                 frame = self.image_settings.apply_postprocess(frame)
+                if self._auto_color_balance_enabled:
+                    self._recalculate_auto_color_balance()
                 frame = self._apply_auto_color_balance(frame)
                 h, w = frame.shape[:2]
                 self._update_stream_stats(w, h)
