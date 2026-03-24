@@ -90,8 +90,6 @@ class MainWindow(QMainWindow):
         self._show_preview_grid = False
         self._show_preview_crosshair = False
         self._preview_auto_scale = True
-        self._roi_mode_enabled = False
-        self._roi_norm: Optional[tuple[float, float, float, float]] = None
 
         self._hidden_tuning = QWidget()
         self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
@@ -165,8 +163,9 @@ class MainWindow(QMainWindow):
         rail.rotate_ccw_clicked.connect(self._rotate_ccw)
         rail.rotate_cw_clicked.connect(self._rotate_cw)
         rail.auto_color_clicked.connect(self._stub_auto_color)
-        rail.recenter_roi_clicked.connect(self._recenter_roi)
-        rail.roi_mode_clicked.connect(self._toggle_roi_mode)
+        rail.recenter_roi_clicked.connect(self._on_recenter_roi_clicked)
+        rail.roi_mode_toggled.connect(self._on_roi_mode_toggled)
+
         self.preview_widget.roi_changed.connect(self._on_roi_changed)
 
         bb = self._clinical.bottom_bar()
@@ -338,25 +337,23 @@ class MainWindow(QMainWindow):
             "This tool will be available in a future update.",
         )
 
-    def _recenter_roi(self) -> None:
-        # Default ROI centered at 60% of current visible frame.
-        self._roi_norm = (0.2, 0.2, 0.6, 0.6)
-        self.preview_widget.set_roi(self._roi_norm)
-        self._refresh_preview_if_idle()
+    def _on_recenter_roi_clicked(self) -> None:
+        self.preview_widget.recenter_roi()
         self.statusBar().showMessage("ROI recentered")
 
-    def _toggle_roi_mode(self) -> None:
-        self._roi_mode_enabled = not self._roi_mode_enabled
-        self.preview_widget.set_roi_mode(self._roi_mode_enabled)
-        msg = "ROI mode enabled: drag on preview to select region"
-        if not self._roi_mode_enabled:
-            msg = "ROI mode disabled"
-        self.statusBar().showMessage(msg)
+    def _on_roi_mode_toggled(self, enabled: bool) -> None:
+        self.preview_widget.set_roi_mode(enabled)
+        if enabled:
+            self.statusBar().showMessage(
+                "ROI mode enabled: drag to draw, drag corners to resize, drag inside to move"
+            )
+        else:
+            self.statusBar().showMessage("ROI mode disabled")
 
     def _on_roi_changed(self, x: float, y: float, w: float, h: float) -> None:
-        self._roi_norm = (x, y, w, h)
-        self.preview_widget.set_roi(self._roi_norm)
-        self.statusBar().showMessage("ROI updated")
+        self.statusBar().showMessage(
+            f"ROI: x={x:.2f}, y={y:.2f}, w={w:.2f}, h={h:.2f}"
+        )
 
     def _on_preset_clicked(self, index: int) -> None:
         QMessageBox.information(
@@ -366,10 +363,7 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_preview_if_idle(self) -> None:
-        if self.preview_timer is not None and not self.preview_timer.isActive():
-            return
-        if self.preview_widget.current_frame is not None:
-            self.preview_widget.display_frame(self.preview_widget.current_frame)
+        pass
 
     def _sync_top_chrome(self) -> None:
         """Keep top status pill, power label, and capture button aligned with camera state."""
@@ -407,14 +401,6 @@ class MainWindow(QMainWindow):
     def _apply_view_transforms(self, bgr: np.ndarray) -> np.ndarray:
         if bgr is None or bgr.size == 0:
             return bgr
-        if self._roi_norm is not None:
-            rx, ry, rw, rh = self._roi_norm
-            fh, fw = bgr.shape[:2]
-            x0 = int(max(0, min(fw - 1, rx * fw)))
-            y0 = int(max(0, min(fh - 1, ry * fh)))
-            x1 = int(max(x0 + 1, min(fw, (rx + rw) * fw)))
-            y1 = int(max(y0 + 1, min(fh, (ry + rh) * fh)))
-            bgr = bgr[y0:y1, x0:x1].copy()
         z = self._clinical.bottom_bar().zoom_percent()
         br = self._clinical.bottom_bar().brightness_percent()
         out = self._zoom_crop(bgr, z)
