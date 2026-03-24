@@ -6,7 +6,7 @@ from typing import Optional
 import numpy as np
 from PyQt6.QtWidgets import QLabel, QWidget
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap, QMouseEvent
 import cv2
 
 
@@ -20,6 +20,8 @@ class PreviewWidget(QLabel):
     
     # Signal emitted when frame is displayed
     frame_displayed = pyqtSignal()
+    # Normalized ROI rectangle (x, y, w, h) in [0,1]
+    roi_changed = pyqtSignal(float, float, float, float)
     
     def __init__(self, parent: Optional[QWidget] = None):
         """
@@ -39,6 +41,12 @@ class PreviewWidget(QLabel):
         self._show_grid = False
         self._show_crosshair = False
         self._auto_scale_preview = True
+        self._roi_mode_enabled = False
+        self._roi_norm: Optional[tuple[float, float, float, float]] = None
+        self._drag_start: Optional[tuple[float, float]] = None
+        self._drag_current: Optional[tuple[float, float]] = None
+        self._last_frame_size: tuple[int, int] = (1, 1)
+        self._last_pixmap_rect: tuple[int, int, int, int] = (0, 0, 1, 1)
 
     def set_show_grid(self, on: bool) -> None:
         self._show_grid = bool(on)
@@ -48,6 +56,18 @@ class PreviewWidget(QLabel):
 
     def set_auto_scale_preview(self, on: bool) -> None:
         self._auto_scale_preview = bool(on)
+
+    def set_roi_mode(self, enabled: bool) -> None:
+        self._roi_mode_enabled = bool(enabled)
+        if not enabled:
+            self._drag_start = None
+            self._drag_current = None
+
+    def set_roi(self, roi_norm: Optional[tuple[float, float, float, float]]) -> None:
+        self._roi_norm = roi_norm
+
+    def clear_roi(self) -> None:
+        self._roi_norm = None
 
     def display_frame(self, frame: Optional[np.ndarray]) -> None:
         """
@@ -69,6 +89,7 @@ class PreviewWidget(QLabel):
         rgb_frame = np.ascontiguousarray(rgb_frame)
 
         h, w, ch = rgb_frame.shape
+        self._last_frame_size = (w, h)
         if self._show_crosshair:
             cx, cy = w // 2, h // 2
             cv2.line(rgb_frame, (cx, 0), (cx, h - 1), (255, 255, 255), 1)
@@ -93,6 +114,13 @@ class PreviewWidget(QLabel):
                     1,
                     cv2.LINE_AA,
                 )
+        if self._roi_norm is not None:
+            rx, ry, rw, rh = self._roi_norm
+            x0 = int(max(0, min(w - 1, rx * w)))
+            y0 = int(max(0, min(h - 1, ry * h)))
+            x1 = int(max(0, min(w - 1, (rx + rw) * w)))
+            y1 = int(max(0, min(h - 1, (ry + rh) * h)))
+            cv2.rectangle(rgb_frame, (x0, y0), (x1, y1), (230, 230, 230), 2)
         bytes_per_line = ch * w
         qt_image = QImage(
             rgb_frame.data,
@@ -130,6 +158,9 @@ class PreviewWidget(QLabel):
                 )
 
         self.setPixmap(scaled_pixmap)
+        px = (self.width() - scaled_pixmap.width()) // 2
+        py = (self.height() - scaled_pixmap.height()) // 2
+        self._last_pixmap_rect = (px, py, scaled_pixmap.width(), scaled_pixmap.height())
         self.frame_displayed.emit()
     
     def clear_display(self) -> None:
@@ -144,3 +175,51 @@ class PreviewWidget(QLabel):
         # Redisplay current frame if available
         if self.current_frame is not None:
             self.display_frame(self.current_frame)
+
+    def _widget_to_norm(self, x: int, y: int) -> Optional[tuple[float, float]]:
+        px, py, pw, ph = self._last_pixmap_rect
+        if pw <= 0 or ph <= 0:
+            return None
+        if x < px or y < py or x > px + pw or y > py + ph:
+            return None
+        nx = (x - px) / float(pw)
+        ny = (y - py) / float(ph)
+        return (max(0.0, min(1.0, nx)), max(0.0, min(1.0, ny)))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._roi_mode_enabled and event.button() == Qt.MouseButton.LeftButton:
+            p = self._widget_to_norm(event.position().x(), event.position().y())
+            if p is not None:
+                self._drag_start = p
+                self._drag_current = p
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._roi_mode_enabled and self._drag_start is not None:
+            p = self._widget_to_norm(event.position().x(), event.position().y())
+            if p is not None:
+                self._drag_current = p
+                sx, sy = self._drag_start
+                cx, cy = self._drag_current
+                x0, y0 = min(sx, cx), min(sy, cy)
+                x1, y1 = max(sx, cx), max(sy, cy)
+                self._roi_norm = (x0, y0, max(0.01, x1 - x0), max(0.01, y1 - y0))
+                if self.current_frame is not None:
+                    self.display_frame(self.current_frame)
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if (
+            self._roi_mode_enabled
+            and self._drag_start is not None
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            if self._roi_norm is not None:
+                rx, ry, rw, rh = self._roi_norm
+                self.roi_changed.emit(rx, ry, rw, rh)
+            self._drag_start = None
+            self._drag_current = None
+            return
+        super().mouseReleaseEvent(event)
