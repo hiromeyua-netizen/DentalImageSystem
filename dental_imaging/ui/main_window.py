@@ -37,18 +37,10 @@ from dental_imaging.settings import (
     resolve_storage_directory,
 )
 from dental_imaging.storage.snapshot_writer import SnapshotWriter
-from dental_imaging.hardware.camera.camera_settings_helper import (
-    get_camera_settings,
-    print_camera_settings,
-)
+from dental_imaging.hardware.camera.camera_settings_helper import print_camera_settings
 from dental_imaging.hardware.camera.focus_helper import diagnose_blur_issues
-from dental_imaging.image_processing import apply_software_image_adjustments
-from dental_imaging.ui.widgets.image_settings_overlay import ImageSettingsOverlay
+from dental_imaging.ui.widgets.image_settings_component import ImageSettingsComponent
 from dental_imaging.ui.widgets.preview_stack import PreviewStack
-
-_EXPOSURE_US_MIN = 1000
-_EXPOSURE_US_MAX = 200_000
-_GAIN_MAX = 20.0
 
 
 class MainWindow(QMainWindow):
@@ -84,8 +76,8 @@ class MainWindow(QMainWindow):
         self.camera: Optional[BaslerCamera] = None
         self.camera_config: Optional[CameraConfig] = None
         self.preview_timer: Optional[QTimer] = None
-        self.image_settings_overlay: Optional[ImageSettingsOverlay] = None
-        
+        self.image_settings = ImageSettingsComponent()
+
         self._setup_ui()
         self._setup_timers()
         
@@ -106,13 +98,12 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(10)
         
         self.preview_widget = PreviewWidget()
-        self.image_settings_overlay = ImageSettingsOverlay()
-        self.image_settings_overlay.settings_changed.connect(
-            self._on_overlay_settings_changed
+        self.image_settings.settings_changed.connect(
+            self._on_image_settings_hardware_push
         )
         self._preview_stack = PreviewStack(
             self.preview_widget,
-            self.image_settings_overlay,
+            self.image_settings,
         )
         main_layout.addWidget(self._preview_stack, stretch=1)
 
@@ -171,11 +162,8 @@ class MainWindow(QMainWindow):
         self.image_settings_button = QPushButton("Image Settings")
         self.image_settings_button.setCheckable(True)
         self.image_settings_button.setChecked(True)
-        self.image_settings_button.clicked.connect(self._toggle_image_settings_panel)
         button_layout.addWidget(self.image_settings_button)
-        self.image_settings_overlay.panel_closed.connect(
-            lambda: self.image_settings_button.setChecked(False)
-        )
+        self.image_settings.wire_toggle_button(self.image_settings_button)
         
         self.start_button = QPushButton("Start Preview")
         self.start_button.clicked.connect(self.start_preview)
@@ -216,45 +204,17 @@ class MainWindow(QMainWindow):
         fps = max(1.0, float(self._app_settings.preview.fps))
         self.preview_timer.setInterval(max(1, int(round(1000.0 / fps))))
 
-    def _toggle_image_settings_panel(self) -> None:
-        if self.image_settings_overlay is None:
-            return
-        self.image_settings_overlay.setVisible(self.image_settings_button.isChecked())
-
-    @staticmethod
-    def _pct_to_exposure_us(pct: int) -> int:
-        span = _EXPOSURE_US_MAX - _EXPOSURE_US_MIN
-        return int(_EXPOSURE_US_MIN + span * max(0, min(100, pct)) / 100.0)
-
-    @staticmethod
-    def _exposure_us_to_pct(us: int) -> int:
-        span = _EXPOSURE_US_MAX - _EXPOSURE_US_MIN
-        if span <= 0:
-            return 50
-        return int(round((us - _EXPOSURE_US_MIN) / span * 100.0))
-
-    @staticmethod
-    def _pct_to_gain(pct: int) -> float:
-        return _GAIN_MAX * max(0, min(100, pct)) / 100.0
-
-    @staticmethod
-    def _gain_to_pct(gain: float) -> int:
-        g = max(0.0, min(_GAIN_MAX, float(gain)))
-        return int(round(g / _GAIN_MAX * 100.0))
-
-    def _on_overlay_settings_changed(self) -> None:
+    def _on_image_settings_hardware_push(self) -> None:
+        """Apply exposure/gain sliders to the camera when not in auto mode."""
         if self._updating_settings or not self.camera or not self.camera.is_connected:
             return
-        if self.image_settings_overlay is None:
-            return
-        v = self.image_settings_overlay.get_values()
         try:
             if not self.auto_exposure_checkbox.isChecked():
-                us = self._pct_to_exposure_us(v.exposure)
+                us = self.image_settings.exposure_time_microseconds()
                 self.camera.set_exposure(us, auto=False)
                 self.statusBar().showMessage(f"Exposure: {us / 1000:.1f} ms")
             if not self.auto_gain_checkbox.isChecked():
-                g = self._pct_to_gain(v.gain)
+                g = self.image_settings.analog_gain()
                 self.camera.set_gain(g, auto=False)
                 self.statusBar().showMessage(f"Gain: {g:.1f}")
         except Exception as e:
@@ -263,7 +223,7 @@ class MainWindow(QMainWindow):
                 "Camera",
                 f"Could not apply exposure or gain.\n\n{str(e)}",
             )
-        
+
     def initialize_camera(self, config: CameraConfig) -> bool:
         """
         Initialize camera with configuration.
@@ -403,11 +363,7 @@ class MainWindow(QMainWindow):
             )
             
             if frame is not None:
-                if self.image_settings_overlay is not None:
-                    frame = apply_software_image_adjustments(
-                        frame,
-                        self.image_settings_overlay.get_values(),
-                    )
+                frame = self.image_settings.apply_postprocess(frame)
                 self.preview_widget.display_frame(frame)
             else:
                 # Frame grab failed, but don't show error for every failed frame
@@ -456,11 +412,7 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-            if self.image_settings_overlay is not None:
-                frame = apply_software_image_adjustments(
-                    frame,
-                    self.image_settings_overlay.get_values(),
-                )
+            frame = self.image_settings.apply_postprocess(frame)
 
             result = self._snapshot_writer.save_bgr(frame, prefix="capture")
             self.statusBar().showMessage(f"Saved: {result.path.name}")
@@ -545,23 +497,21 @@ class MainWindow(QMainWindow):
         try:
             exp_auto, exp_value = self.camera.get_exposure()
             self.auto_exposure_checkbox.setChecked(exp_auto)
-            if self.image_settings_overlay is not None:
-                self.image_settings_overlay.set_exposure_slider_enabled(not exp_auto)
-                if not exp_auto and exp_value > 0:
-                    self.image_settings_overlay.set_exposure_percent(
-                        self._exposure_us_to_pct(exp_value),
-                        block_signals=True,
-                    )
+            self.image_settings.set_exposure_slider_enabled(not exp_auto)
+            if not exp_auto and exp_value > 0:
+                self.image_settings.set_exposure_percent(
+                    self.image_settings.exposure_percent_from_microseconds(exp_value),
+                    block_signals=True,
+                )
 
             gain_auto, gain_value = self.camera.get_gain()
             self.auto_gain_checkbox.setChecked(gain_auto)
-            if self.image_settings_overlay is not None:
-                self.image_settings_overlay.set_gain_slider_enabled(not gain_auto)
-                if not gain_auto:
-                    self.image_settings_overlay.set_gain_percent(
-                        self._gain_to_pct(gain_value),
-                        block_signals=True,
-                    )
+            self.image_settings.set_gain_slider_enabled(not gain_auto)
+            if not gain_auto:
+                self.image_settings.set_gain_percent(
+                    self.image_settings.gain_percent_from_analog(gain_value),
+                    block_signals=True,
+                )
 
             try:
                 wb_auto = self.camera.get_white_balance()
@@ -594,9 +544,8 @@ class MainWindow(QMainWindow):
             return
         
         auto = state == Qt.CheckState.Checked
-        if self.image_settings_overlay is not None:
-            self.image_settings_overlay.set_exposure_slider_enabled(not auto)
-        
+        self.image_settings.set_exposure_slider_enabled(not auto)
+
         if auto:
             try:
                 self.camera.set_exposure(0, auto=True)
@@ -604,7 +553,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to set auto-exposure: {e}")
         else:
-            self._on_overlay_settings_changed()
+            self._on_image_settings_hardware_push()
     
     def on_gain_auto_changed(self, state: int) -> None:
         """Handle gain auto checkbox change."""
@@ -612,9 +561,8 @@ class MainWindow(QMainWindow):
             return
         
         auto = state == Qt.CheckState.Checked
-        if self.image_settings_overlay is not None:
-            self.image_settings_overlay.set_gain_slider_enabled(not auto)
-        
+        self.image_settings.set_gain_slider_enabled(not auto)
+
         if auto:
             try:
                 self.camera.set_gain(0.0, auto=True)
@@ -622,7 +570,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to set auto-gain: {e}")
         else:
-            self._on_overlay_settings_changed()
+            self._on_image_settings_hardware_push()
     
     def on_white_balance_auto_changed(self, state: int) -> None:
         """Handle white balance auto checkbox change."""
