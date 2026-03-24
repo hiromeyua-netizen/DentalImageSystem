@@ -479,6 +479,8 @@ class ClinicalViewport(QWidget):
         if self._settings is not None and self._settings.isVisible():
             margin_s = 12
             avail_h = max(200, preview_h - 2 * margin_s)
+            if hasattr(self._settings, "set_responsive_metrics"):
+                self._settings.set_responsive_metrics(w - rw - 2 * margin_s, preview_h)
             self._settings.setMaximumHeight(avail_h)
             self._settings.adjustSize()
             sw = self._settings.width()
