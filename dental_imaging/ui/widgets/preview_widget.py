@@ -88,6 +88,16 @@ class PreviewWidget(QLabel):
     def roi_rect(self) -> Optional[tuple[int, int, int, int]]:
         return self._roi_rect
 
+    def set_roi_rect(self, rect: Optional[tuple[int, int, int, int]]) -> None:
+        """Restore ROI rectangle from a preset snapshot."""
+        if rect is None:
+            self._roi_rect = None
+            self._redraw_current()
+            return
+        self._roi_rect = self._clamp_rect(rect)
+        self.roi_changed.emit(self._roi_rect)
+        self._redraw_current()
+
     def display_frame(self, frame: Optional[np.ndarray]) -> None:
         """
         Display a camera frame.

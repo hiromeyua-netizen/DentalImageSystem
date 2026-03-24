@@ -280,6 +280,7 @@ class BottomControlBar(QFrame):
     brightness_changed = pyqtSignal(int)
     zoom_changed = pyqtSignal(int)
     preset_clicked = pyqtSignal(int)
+    preset_save_requested = pyqtSignal(int)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -383,13 +384,21 @@ class BottomControlBar(QFrame):
         preset_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preset_row = QHBoxLayout()
         preset_row.setSpacing(10)
+        self._preset_buttons = []
         for i in range(3):
             p = QPushButton(str(i + 1))
             p.setObjectName("presetChip")
             p.setCursor(Qt.CursorShape.PointingHandCursor)
+            p.setCheckable(True)
+            p.setAutoExclusive(True)
+            p.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             idx = i
             p.clicked.connect(lambda checked=False, n=idx: self.preset_clicked.emit(n))
+            p.customContextMenuRequested.connect(
+                lambda _pos, n=idx: self.preset_save_requested.emit(n)
+            )
             preset_row.addWidget(p)
+            self._preset_buttons.append(p)
         preset_box.addWidget(preset_lbl)
         preset_box.addLayout(preset_row)
         grid.addLayout(preset_box, 0, 4, 3, 1)
@@ -401,6 +410,18 @@ class BottomControlBar(QFrame):
 
     def zoom_percent(self) -> int:
         return self._zoom_slider.value()
+
+    def set_brightness_percent(self, value: int) -> None:
+        self._brightness_slider.setValue(max(0, min(100, int(value))))
+
+    def set_zoom_percent(self, value: int) -> None:
+        self._zoom_slider.setValue(max(0, min(100, int(value))))
+
+    def set_active_preset(self, index: int) -> None:
+        if not hasattr(self, "_preset_buttons"):
+            return
+        if 0 <= index < len(self._preset_buttons):
+            self._preset_buttons[index].setChecked(True)
 
 
 class ClinicalViewport(QWidget):

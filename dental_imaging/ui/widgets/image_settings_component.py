@@ -253,6 +253,29 @@ class ImageSettingsComponent(QFrame):
             tint=self._sliders["tint"].value(),
         )
 
+    def set_values(self, values: ImageSettingsPercent, *, block_signals: bool = True) -> None:
+        """Apply all slider values from a preset snapshot."""
+        mapping = {
+            "exposure": int(values.exposure),
+            "gain": int(values.gain),
+            "white_balance": int(values.white_balance),
+            "contrast": int(values.contrast),
+            "saturation": int(values.saturation),
+            "warmth": int(values.warmth),
+            "tint": int(values.tint),
+        }
+        for key, slider in self._sliders.items():
+            if block_signals:
+                slider.blockSignals(True)
+            try:
+                v = max(0, min(100, mapping[key]))
+                slider.setValue(v)
+                self._labels[key].setText(f"{v}%")
+            finally:
+                if block_signals:
+                    slider.blockSignals(False)
+        self.settings_changed.emit()
+
     def apply_postprocess(self, bgr: np.ndarray) -> np.ndarray:
         return apply_software_image_adjustments(bgr, self.get_values())
 

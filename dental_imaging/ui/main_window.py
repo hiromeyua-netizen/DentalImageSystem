@@ -2,6 +2,8 @@
 Main application window.
 """
 
+import json
+from pathlib import Path
 from typing import Optional
 
 import cv2
@@ -39,6 +41,7 @@ from dental_imaging.storage.snapshot_writer import SnapshotWriter
 from dental_imaging.hardware.camera.camera_settings_helper import print_camera_settings
 from dental_imaging.hardware.camera.focus_helper import diagnose_blur_issues
 from dental_imaging.ui.widgets.image_settings_component import ImageSettingsComponent
+from dental_imaging.image_processing.color_adjustments import ImageSettingsPercent
 
 
 class MainWindow(QMainWindow):
@@ -93,6 +96,8 @@ class MainWindow(QMainWindow):
         self._roi_mode_active = False
         self._auto_color_balance_enabled = False
         self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)  # B, G, R
+        self._presets = [None, None, None]
+        self._active_preset_index: Optional[int] = None
 
         self._hidden_tuning = QWidget()
         self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
@@ -173,6 +178,9 @@ class MainWindow(QMainWindow):
         bb.brightness_changed.connect(lambda _v: self._refresh_preview_if_idle())
         bb.zoom_changed.connect(lambda _v: self._refresh_preview_if_idle())
         bb.preset_clicked.connect(self._on_preset_clicked)
+        bb.preset_save_requested.connect(self._on_preset_save_requested)
+
+        self._load_presets()
 
         self._sync_top_chrome()
 
@@ -395,14 +403,123 @@ class MainWindow(QMainWindow):
         )
 
     def _on_preset_clicked(self, index: int) -> None:
-        QMessageBox.information(
-            self,
-            "Presets",
-            f"Preset {index + 1} will be configurable in a future update.",
-        )
+        if not (0 <= index < len(self._presets)):
+            return
+        preset = self._presets[index]
+        if not preset:
+            self.statusBar().showMessage(
+                f"Preset {index + 1} is empty. Right-click to save current setup."
+            )
+            return
+        try:
+            self._apply_preset(preset)
+            self._active_preset_index = index
+            self._clinical.bottom_bar().set_active_preset(index)
+            self.statusBar().showMessage(f"Preset {index + 1} applied")
+        except Exception as e:
+            QMessageBox.warning(self, "Presets", f"Failed to apply preset {index + 1}.\n\n{e}")
+
+    def _on_preset_save_requested(self, index: int) -> None:
+        if not (0 <= index < len(self._presets)):
+            return
+        self._presets[index] = self._capture_current_preset()
+        self._active_preset_index = index
+        self._clinical.bottom_bar().set_active_preset(index)
+        self._save_presets()
+        self.statusBar().showMessage(f"Preset {index + 1} saved")
 
     def _refresh_preview_if_idle(self) -> None:
         pass
+
+    def _presets_path(self) -> Path:
+        return Path.home() / ".dental_imaging_presets.json"
+
+    def _capture_current_preset(self) -> dict:
+        iv = self.image_settings.get_values()
+        roi = self.preview_widget.roi_rect()
+        return {
+            "image_settings": {
+                "exposure": int(iv.exposure),
+                "gain": int(iv.gain),
+                "white_balance": int(iv.white_balance),
+                "contrast": int(iv.contrast),
+                "saturation": int(iv.saturation),
+                "warmth": int(iv.warmth),
+                "tint": int(iv.tint),
+            },
+            "brightness": int(self._clinical.bottom_bar().brightness_percent()),
+            "zoom": int(self._clinical.bottom_bar().zoom_percent()),
+            "flip_h": bool(self._flip_h),
+            "flip_v": bool(self._flip_v),
+            "rotate_q": int(self._rotate_quarter_turns),
+            "auto_color_enabled": bool(self._auto_color_balance_enabled),
+            "auto_color_gains": [float(x) for x in self._auto_color_gains.tolist()],
+            "roi_mode": bool(self._roi_mode_active),
+            "roi_rect": list(roi) if roi is not None else None,
+        }
+
+    def _apply_preset(self, preset: dict) -> None:
+        ivd = preset.get("image_settings", {})
+        iv = ImageSettingsPercent(
+            exposure=int(ivd.get("exposure", 50)),
+            gain=int(ivd.get("gain", 50)),
+            white_balance=int(ivd.get("white_balance", 50)),
+            contrast=int(ivd.get("contrast", 50)),
+            saturation=int(ivd.get("saturation", 50)),
+            warmth=int(ivd.get("warmth", 50)),
+            tint=int(ivd.get("tint", 50)),
+        )
+        self.image_settings.set_values(iv, block_signals=True)
+
+        bb = self._clinical.bottom_bar()
+        bb.set_brightness_percent(int(preset.get("brightness", 50)))
+        bb.set_zoom_percent(int(preset.get("zoom", 0)))
+
+        self._flip_h = bool(preset.get("flip_h", False))
+        self._flip_v = bool(preset.get("flip_v", False))
+        self._rotate_quarter_turns = int(preset.get("rotate_q", 0)) % 4
+
+        roi_rect = preset.get("roi_rect")
+        if isinstance(roi_rect, list) and len(roi_rect) == 4:
+            self.preview_widget.set_roi_rect(
+                (int(roi_rect[0]), int(roi_rect[1]), int(roi_rect[2]), int(roi_rect[3]))
+            )
+        else:
+            self.preview_widget.set_roi_rect(None)
+
+        roi_enabled = bool(preset.get("roi_mode", False))
+        self._clinical.right_rail().roi_mode_button().setChecked(roi_enabled)
+
+        gains = preset.get("auto_color_gains", [1.0, 1.0, 1.0])
+        if isinstance(gains, list) and len(gains) == 3:
+            self._auto_color_gains = np.array(
+                [float(gains[0]), float(gains[1]), float(gains[2])], dtype=np.float32
+            )
+        else:
+            self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        ac_enabled = bool(preset.get("auto_color_enabled", False))
+        self._clinical.right_rail().auto_color_button().setChecked(ac_enabled)
+
+        self._redraw_preview_if_possible()
+
+    def _load_presets(self) -> None:
+        p = self._presets_path()
+        if not p.exists():
+            return
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            items = raw.get("presets", [])
+            if isinstance(items, list):
+                for i in range(min(3, len(items))):
+                    self._presets[i] = items[i]
+        except Exception:
+            # Keep app functional even if preset file is corrupted.
+            self._presets = [None, None, None]
+
+    def _save_presets(self) -> None:
+        p = self._presets_path()
+        payload = {"presets": self._presets}
+        p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _sync_top_chrome(self) -> None:
         """Keep top status pill, power label, and capture button aligned with camera state."""
