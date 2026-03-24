@@ -3,6 +3,7 @@ Main application window.
 """
 
 from typing import Optional
+
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -19,15 +20,24 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QGridLayout,
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtGui import QDesktopServices
 from dental_imaging.ui.widgets.preview_widget import PreviewWidget
 from dental_imaging.hardware.camera import BaslerCamera
 from dental_imaging.models.camera_config import CameraConfig
 from dental_imaging.exceptions import (
     CameraNotFoundError,
     CameraConnectionError,
+    CameraConfigurationError,
     CameraGrabError,
 )
+from dental_imaging.settings import (
+    ApplicationSettings,
+    load_app_settings,
+    resolve_default_config_path,
+    resolve_storage_directory,
+)
+from dental_imaging.storage.snapshot_writer import SnapshotWriter
 from dental_imaging.hardware.camera.camera_settings_helper import (
     get_camera_settings,
     print_camera_settings,
@@ -40,14 +50,30 @@ class MainWindow(QMainWindow):
     Main application window for dental imaging system.
     """
     
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        app_settings: Optional[ApplicationSettings] = None,
+    ):
         """
         Initialize main window.
         
         Args:
             parent: Parent widget
+            app_settings: Loaded application config; if omitted, loads from the default path.
         """
         super().__init__(parent)
+
+        self._app_settings = app_settings or load_app_settings(
+            resolve_default_config_path()
+        )
+        storage_dir = resolve_storage_directory(self._app_settings)
+        self._snapshot_writer = SnapshotWriter(
+            storage_dir,
+            self._app_settings.storage.default_format,
+        )
+        self._preview_width = self._app_settings.preview.width
+        self._preview_height = self._app_settings.preview.height
         
         self.camera: Optional[BaslerCamera] = None
         self.camera_config: Optional[CameraConfig] = None
@@ -58,7 +84,9 @@ class MainWindow(QMainWindow):
         
     def _setup_ui(self) -> None:
         """Set up the user interface."""
-        self.setWindowTitle("Dental Imaging System - Camera Preview")
+        self.setWindowTitle(
+            f"{self._app_settings.application.name} — Camera"
+        )
         self.setMinimumSize(1280, 720)
         
         # Central widget
@@ -186,6 +214,11 @@ class MainWindow(QMainWindow):
         self.diagnose_button = QPushButton("Diagnose Blur")
         self.diagnose_button.clicked.connect(self.diagnose_blur)
         button_layout.addWidget(self.diagnose_button)
+
+        self.reconnect_button = QPushButton("Reconnect Camera")
+        self.reconnect_button.clicked.connect(self.reconnect_camera)
+        self.reconnect_button.setEnabled(False)
+        button_layout.addWidget(self.reconnect_button)
         
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
@@ -200,8 +233,8 @@ class MainWindow(QMainWindow):
         """Set up timers for preview updates."""
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self.update_preview)
-        # Update at ~30 FPS
-        self.preview_timer.setInterval(33)  # ~30 FPS
+        fps = max(1.0, float(self._app_settings.preview.fps))
+        self.preview_timer.setInterval(max(1, int(round(1000.0 / fps))))
         
     def initialize_camera(self, config: CameraConfig) -> bool:
         """
@@ -232,6 +265,7 @@ class MainWindow(QMainWindow):
             
             self.statusBar().showMessage("Camera connected successfully")
             self.start_button.setEnabled(True)
+            self.reconnect_button.setEnabled(True)
             
             return True
             
@@ -254,6 +288,23 @@ class MainWindow(QMainWindow):
                 f"Failed to connect to camera.\n\n{str(e)}"
             )
             self.statusBar().showMessage("Connection failed")
+            return False
+
+        except CameraConfigurationError as e:
+            QMessageBox.critical(
+                self,
+                "Camera Configuration",
+                f"The camera connected but settings could not be applied.\n\n{str(e)}\n\n"
+                "Try adjusting resolution or exposure in config/camera_defaults.json "
+                "to match your camera model.",
+            )
+            self.statusBar().showMessage("Camera configuration failed")
+            if self.camera:
+                try:
+                    self.camera.disconnect()
+                except Exception:
+                    pass
+                self.camera = None
             return False
             
         except Exception as e:
@@ -319,7 +370,9 @@ class MainWindow(QMainWindow):
         
         try:
             # Grab preview frame (1920x1080)
-            frame = self.camera.grab_preview_frame(1920, 1080)
+            frame = self.camera.grab_preview_frame(
+                self._preview_width, self._preview_height
+            )
             
             if frame is not None:
                 self.preview_widget.display_frame(frame)
@@ -340,7 +393,7 @@ class MainWindow(QMainWindow):
             )
     
     def capture_image(self) -> None:
-        """Capture a full-resolution image."""
+        """Capture a full-resolution image and save it under the configured storage folder."""
         if not self.camera or not self.camera.is_connected:
             QMessageBox.warning(
                 self,
@@ -352,28 +405,32 @@ class MainWindow(QMainWindow):
         try:
             self.statusBar().showMessage("Capturing image...")
             
-            # Grab full resolution frame
             frame = self.camera.grab_frame()
             
-            if frame is not None:
-                self.statusBar().showMessage(
-                    f"Image captured! Shape: {frame.shape[1]}x{frame.shape[0]}"
-                )
-                # TODO: Save image to file
-                QMessageBox.information(
-                    self,
-                    "Capture Success",
-                    f"Image captured successfully!\n\n"
-                    f"Resolution: {frame.shape[1]}x{frame.shape[0]}\n"
-                    f"Channels: {frame.shape[2] if len(frame.shape) > 2 else 1}"
-                )
-            else:
+            if frame is None:
                 self.statusBar().showMessage("Capture failed")
                 QMessageBox.warning(
                     self,
                     "Capture Failed",
                     "Failed to capture image. Please try again."
                 )
+                return
+
+            result = self._snapshot_writer.save_bgr(frame, prefix="capture")
+            self.statusBar().showMessage(f"Saved: {result.path.name}")
+
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setWindowTitle("Capture saved")
+            msg.setText(
+                f"Resolution: {result.width}×{result.height}\n\n"
+                f"{result.path}"
+            )
+            open_folder = msg.addButton("Open Folder", QMessageBox.ButtonRole.ActionRole)
+            msg.addButton(QMessageBox.StandardButton.Ok)
+            msg.exec()
+            if msg.clickedButton() == open_folder:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.path.parent)))
                 
         except CameraGrabError as e:
             QMessageBox.warning(
@@ -382,6 +439,13 @@ class MainWindow(QMainWindow):
                 f"Failed to capture image.\n\n{str(e)}"
             )
             self.statusBar().showMessage("Capture error")
+        except (OSError, ValueError, RuntimeError) as e:
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                f"The image was grabbed but could not be saved.\n\n{str(e)}"
+            )
+            self.statusBar().showMessage("Save error")
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -389,6 +453,33 @@ class MainWindow(QMainWindow):
                 f"Unexpected error during capture.\n\n{str(e)}"
             )
             self.statusBar().showMessage("Capture error")
+
+    def reconnect_camera(self) -> None:
+        """Disconnect and reconnect the camera using the last successful configuration."""
+        if not self.camera_config:
+            QMessageBox.warning(
+                self,
+                "Reconnect",
+                "No camera configuration is loaded.",
+            )
+            return
+
+        was_preview = self.camera is not None and self.camera.is_grabbing
+        self.stop_preview()
+
+        if self.camera:
+            try:
+                self.camera.disconnect()
+            except Exception:
+                pass
+            self.camera = None
+
+        self.start_button.setEnabled(False)
+        self.reconnect_button.setEnabled(False)
+        self.statusBar().showMessage("Reconnecting…")
+
+        if self.initialize_camera(self.camera_config) and was_preview:
+            self.start_preview()
     
     def _update_settings_ui(self) -> None:
         """Update UI controls with current camera settings."""

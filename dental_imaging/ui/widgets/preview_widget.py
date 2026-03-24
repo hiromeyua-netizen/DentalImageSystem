@@ -4,8 +4,8 @@ Preview widget for displaying camera feed.
 
 from typing import Optional
 import numpy as np
-from PyQt6.QtWidgets import QWidget, QLabel
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QLabel, QWidget
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 import cv2
 
@@ -53,10 +53,9 @@ class PreviewWidget(QLabel):
         height, width = frame.shape[:2]
         self._aspect_ratio = width / height
         
-        # Convert BGR to RGB for QImage
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Create QImage from numpy array
+        rgb_frame = np.ascontiguousarray(rgb_frame)
+
         h, w, ch = rgb_frame.shape
         bytes_per_line = ch * w
         qt_image = QImage(
@@ -64,8 +63,8 @@ class PreviewWidget(QLabel):
             w,
             h,
             bytes_per_line,
-            QImage.Format.Format_RGB888
-        )
+            QImage.Format.Format_RGB888,
+        ).copy()
         
         # Scale pixmap to fit widget while maintaining aspect ratio
         # Use FastTransformation for better performance and sharpness

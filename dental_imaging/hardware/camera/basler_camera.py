@@ -208,26 +208,30 @@ class BaslerCamera:
         if not self.is_connected:
             raise CameraConnectionError("Camera not connected. Call connect() first.")
         
+        grab_result = None
         try:
             if not self.is_grabbing:
-                # Grab single frame without continuous grabbing
                 grab_result = self.camera.GrabOne(timeout_ms)
             else:
-                # Retrieve latest frame from continuous grabbing
-                grab_result = self.camera.RetrieveResult(timeout_ms, pylon.TimeoutHandling_ThrowException)
-            
+                grab_result = self.camera.RetrieveResult(
+                    timeout_ms, pylon.TimeoutHandling_ThrowException
+                )
+
+            if grab_result is None:
+                return None
+
             if not grab_result.GrabSucceeded():
                 return None
-            
-            # Convert to OpenCV format
-            img = grab_result_to_opencv(grab_result)
-            
-            return img
-            
+
+            return grab_result_to_opencv(grab_result)
+
         except pylon.TimeoutException:
             raise CameraGrabError(f"Frame grab timeout after {timeout_ms}ms")
         except Exception as e:
             raise CameraGrabError(f"Failed to grab frame: {str(e)}") from e
+        finally:
+            if grab_result is not None:
+                grab_result.Release()
     
     def grab_preview_frame(self, preview_width: int = 1920, preview_height: int = 1080) -> Optional[np.ndarray]:
         """

@@ -21,6 +21,9 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
+[project.scripts]
+dental-imaging = "dental_imaging.main:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",

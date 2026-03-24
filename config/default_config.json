@@ -4,7 +4,8 @@
     "version": "0.1.0",
     "kiosk_mode": true,
     "fullscreen": true,
-    "splash_screen_duration": 2000
+    "splash_screen_duration": 2000,
+    "auto_start_preview": true
   },
   "preview": {
     "resolution": {
