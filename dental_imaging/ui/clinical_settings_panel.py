@@ -309,10 +309,12 @@ class ClinicalSettingsPanel(QFrame):
         self._quality_slider.setRange(60, 100)
         self._quality_slider.setValue(94)
         self._quality_slider.valueChanged.connect(self._on_quality_slider)
+        self._quality_slider.hide()
         self._led_slider = QSlider(Qt.Orientation.Horizontal, self)
         self._led_slider.setRange(0, 100)
         self._led_slider.setValue(50)
         self._led_slider.valueChanged.connect(self._on_led_slider)
+        self._led_slider.hide()
 
     def _toggle_row(self, text: str, kind: str) -> QHBoxLayout:
         row = QHBoxLayout()
