@@ -300,6 +300,25 @@ class ImageSettingsComponent(QFrame):
             if block_signals:
                 s.blockSignals(False)
 
+    def slider_percent(self, key: str) -> int:
+        if key not in self._sliders:
+            raise KeyError(f"Unknown slider key: {key}")
+        return int(self._sliders[key].value())
+
+    def set_slider_percent(self, key: str, pct: int, *, block_signals: bool = False) -> None:
+        if key not in self._sliders:
+            raise KeyError(f"Unknown slider key: {key}")
+        v = max(0, min(100, int(pct)))
+        s = self._sliders[key]
+        if block_signals:
+            s.blockSignals(True)
+        try:
+            s.setValue(v)
+            self._labels[key].setText(f"{v}%")
+        finally:
+            if block_signals:
+                s.blockSignals(False)
+
     def set_panel_visible(self, visible: bool) -> None:
         self.setVisible(visible)
 

@@ -330,10 +330,57 @@ class MainWindow(QMainWindow):
         self._rotate_quarter_turns = (self._rotate_quarter_turns + 1) % 4
 
     def _stub_auto_color(self) -> None:
-        QMessageBox.information(
-            self,
-            "Auto color balance",
-            "This tool will be available in a future update.",
+        frame = None
+        if self.camera is not None and self.camera.is_grabbing:
+            try:
+                frame = self.camera.grab_preview_frame(
+                    self._preview_width, self._preview_height
+                )
+            except Exception:
+                frame = None
+        if frame is None:
+            frame = self.preview_widget.current_frame
+        if frame is None or frame.size == 0:
+            self.statusBar().showMessage("Auto color balance: no frame available")
+            return
+
+        roi = self.preview_widget.roi_rect()
+        sample = frame
+        if roi is not None:
+            x, y, w, h = roi
+            fh, fw = frame.shape[:2]
+            x = max(0, min(x, fw - 1))
+            y = max(0, min(y, fh - 1))
+            w = max(1, min(w, fw - x))
+            h = max(1, min(h, fh - y))
+            sample = frame[y : y + h, x : x + w]
+
+        mean_b, mean_g, mean_r = cv2.mean(sample)[:3]
+        if min(mean_b, mean_g, mean_r) <= 1e-3:
+            self.statusBar().showMessage("Auto color balance: frame too dark")
+            return
+
+        # Gray-world style correction mapped to white-balance/tint sliders.
+        target = (mean_r + mean_g + mean_b) / 3.0
+        rb_ratio = (mean_b - mean_r) / max(1.0, (mean_b + mean_r))
+        wb_k = max(-1.0, min(1.0, rb_ratio / 0.35))
+        wb_pct = int(round(50.0 + 50.0 * wb_k))
+
+        g_factor = target / mean_g
+        tint_k = max(-1.0, min(1.0, (g_factor - 1.0) / 0.22))
+        tint_pct = int(round(50.0 + 50.0 * tint_k))
+
+        # Blend with current values for smoother behavior.
+        cur_wb = self.image_settings.slider_percent("white_balance")
+        cur_tint = self.image_settings.slider_percent("tint")
+        out_wb = int(round(cur_wb * 0.4 + wb_pct * 0.6))
+        out_tint = int(round(cur_tint * 0.4 + tint_pct * 0.6))
+
+        self.image_settings.set_slider_percent("white_balance", out_wb)
+        self.image_settings.set_slider_percent("tint", out_tint)
+        self.image_settings.set_slider_percent("warmth", 50)
+        self.statusBar().showMessage(
+            f"Auto color balance applied (WB {out_wb}%, Tint {out_tint}%)"
         )
 
     def _stub_recenter_roi(self) -> None:
