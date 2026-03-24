@@ -7,6 +7,7 @@ from typing import Optional
 import cv2
 import numpy as np
 from PyQt6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -18,7 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
 from dental_imaging.ui.clinical_shell import ClinicalViewport
-from dental_imaging.ui.camera_settings_dialog import CameraSettingsDialog
+from dental_imaging.ui.clinical_settings_panel import ClinicalSettingsPanel
 from dental_imaging.ui.widgets.preview_widget import PreviewWidget
 from dental_imaging.hardware.camera import BaslerCamera
 from dental_imaging.models.camera_config import CameraConfig
@@ -66,6 +67,7 @@ class MainWindow(QMainWindow):
         self._snapshot_writer = SnapshotWriter(
             storage_dir,
             self._app_settings.storage.default_format,
+            jpeg_quality=94,
         )
         self._preview_width = self._app_settings.preview.width
         self._preview_height = self._app_settings.preview.height
@@ -80,6 +82,14 @@ class MainWindow(QMainWindow):
         self._flip_h = False
         self._flip_v = False
         self._rotate_quarter_turns = 0  # 0–3 clockwise steps
+        self._export_full_resolution = True
+        self._burst_capture_mode = False
+        self._burst_delay_sec = 10
+        self._camera_sound_enabled = True
+        self._storage_sd_selected = False
+        self._show_preview_grid = False
+        self._show_preview_crosshair = False
+        self._preview_auto_scale = True
 
         self._hidden_tuning = QWidget()
         self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
@@ -123,10 +133,15 @@ class MainWindow(QMainWindow):
             self._on_gain_slider_manual
         )
 
+        self._settings_panel = ClinicalSettingsPanel(
+            self._app_settings.application.name,
+            f"v{self._app_settings.application.version}",
+        )
         self._clinical = ClinicalViewport(
             self.preview_widget,
             self.image_settings,
             brand_title=brand,
+            settings_panel=self._settings_panel,
         )
         self.setCentralWidget(self._clinical)
 
@@ -137,8 +152,10 @@ class MainWindow(QMainWindow):
         rail = self._clinical.right_rail()
         self.image_settings.wire_toggle_button(rail.image_settings_button())
         rail.capture_clicked.connect(self.capture_image)
-        rail.settings_clicked.connect(self._open_camera_settings_dialog)
+        rail.settings_toggled.connect(self._on_settings_toggled)
         self._clinical.top_bar().power_clicked.connect(self._on_power_clicked)
+
+        self._wire_settings_panel()
 
         rail.flip_horizontal_clicked.connect(self._toggle_flip_h)
         rail.flip_vertical_clicked.connect(self._toggle_flip_v)
@@ -165,11 +182,8 @@ class MainWindow(QMainWindow):
         fps = max(1.0, float(self._app_settings.preview.fps))
         self.preview_timer.setInterval(max(1, int(round(1000.0 / fps))))
 
-    def _open_camera_settings_dialog(self) -> None:
-        dlg = CameraSettingsDialog(self)
-        dlg.frame_rate_spinbox.setValue(self.frame_rate_spinbox.value())
-        dlg.gamma_slider.setValue(self.gamma_slider.value())
-        dlg.gamma_spinbox.setValue(self.gamma_spinbox.value())
+    def _wire_settings_panel(self) -> None:
+        sp = self._settings_panel
 
         def sync_fps(v: float) -> None:
             self.frame_rate_spinbox.blockSignals(True)
@@ -189,14 +203,106 @@ class MainWindow(QMainWindow):
             self.gamma_spinbox.blockSignals(False)
             self.on_gamma_spinbox_changed(v)
 
-        dlg.frame_rate_spinbox.valueChanged.connect(sync_fps)
-        dlg.gamma_slider.valueChanged.connect(sync_gamma_slider)
-        dlg.gamma_spinbox.valueChanged.connect(sync_gamma_spin)
-        dlg.start_preview_btn.clicked.connect(self.start_preview)
-        dlg.stop_preview_btn.clicked.connect(self.stop_preview)
-        dlg.diagnose_btn.clicked.connect(self.diagnose_blur)
-        dlg.reconnect_btn.clicked.connect(self.reconnect_camera)
-        dlg.exec()
+        sp.frame_rate_spinbox.valueChanged.connect(sync_fps)
+        sp.gamma_slider.valueChanged.connect(sync_gamma_slider)
+        sp.gamma_spinbox.valueChanged.connect(sync_gamma_spin)
+        sp.start_preview_btn.clicked.connect(self.start_preview)
+        sp.stop_preview_btn.clicked.connect(self.stop_preview)
+        sp.diagnose_btn.clicked.connect(self.diagnose_blur)
+        sp.reconnect_btn.clicked.connect(self.reconnect_camera)
+
+        sp.close_requested.connect(self._close_settings_panel)
+        sp.show_grid_changed.connect(self._on_show_grid_changed)
+        sp.show_crosshair_changed.connect(self._on_show_crosshair_changed)
+        sp.auto_scale_preview_changed.connect(self._on_auto_scale_preview_changed)
+        sp.export_scope_changed.connect(self._on_export_scope_changed)
+        sp.capture_format_changed.connect(self._on_capture_format_changed)
+        sp.jpeg_quality_changed.connect(self._on_jpeg_quality_changed)
+        sp.capture_mode_changed.connect(self._on_capture_mode_changed)
+        sp.burst_delay_sec_changed.connect(self._on_burst_delay_changed)
+        sp.camera_sound_changed.connect(self._on_camera_sound_changed)
+        sp.storage_target_changed.connect(self._on_storage_target_changed)
+        sp.sd_card_requested.connect(self._on_sd_card_stub)
+
+    def _on_settings_toggled(self, open_: bool) -> None:
+        if open_:
+            self._sync_settings_panel_from_state()
+            self._settings_panel.show()
+        else:
+            self._settings_panel.hide()
+        self._clinical.layout_chrome()
+
+    def _close_settings_panel(self) -> None:
+        self._settings_panel.hide()
+        self._clinical.right_rail().settings_tool_button().setChecked(False)
+        self._clinical.layout_chrome()
+
+    def _sync_settings_panel_from_state(self) -> None:
+        fmt = self._snapshot_writer.image_format
+        self._settings_panel.sync_from_main_window(
+            show_grid=self._show_preview_grid,
+            show_crosshair=self._show_preview_crosshair,
+            auto_scale=self._preview_auto_scale,
+            export_full_resolution=self._export_full_resolution,
+            image_format=fmt,
+            jpeg_quality=self._snapshot_writer.jpeg_quality,
+            capture_mode_burst=self._burst_capture_mode,
+            burst_delay_sec=self._burst_delay_sec,
+            camera_sound=self._camera_sound_enabled,
+            storage_sd_selected=self._storage_sd_selected,
+            frame_rate=self.frame_rate_spinbox.value(),
+            gamma_slider_value=self.gamma_slider.value(),
+            gamma_spin_value=self.gamma_spinbox.value(),
+        )
+
+    def _on_show_grid_changed(self, on: bool) -> None:
+        self._show_preview_grid = on
+        self.preview_widget.set_show_grid(on)
+        self._redraw_preview_if_possible()
+
+    def _on_show_crosshair_changed(self, on: bool) -> None:
+        self._show_preview_crosshair = on
+        self.preview_widget.set_show_crosshair(on)
+        self._redraw_preview_if_possible()
+
+    def _on_auto_scale_preview_changed(self, on: bool) -> None:
+        self._preview_auto_scale = on
+        self.preview_widget.set_auto_scale_preview(on)
+        self._redraw_preview_if_possible()
+
+    def _redraw_preview_if_possible(self) -> None:
+        if self.preview_widget.current_frame is not None:
+            self.preview_widget.display_frame(self.preview_widget.current_frame)
+
+    def _on_export_scope_changed(self, scope: str) -> None:
+        self._export_full_resolution = scope == "full"
+
+    def _on_capture_format_changed(self, fmt: str) -> None:
+        self._snapshot_writer.set_image_format(fmt)
+
+    def _on_jpeg_quality_changed(self, quality: int) -> None:
+        self._snapshot_writer.set_jpeg_quality(quality)
+
+    def _on_capture_mode_changed(self, mode: str) -> None:
+        self._burst_capture_mode = mode == "burst"
+
+    def _on_burst_delay_changed(self, sec: int) -> None:
+        self._burst_delay_sec = sec
+
+    def _on_camera_sound_changed(self, on: bool) -> None:
+        self._camera_sound_enabled = on
+
+    def _on_storage_target_changed(self, target: str) -> None:
+        self._storage_sd_selected = target == "sd"
+
+    def _on_sd_card_stub(self) -> None:
+        QMessageBox.information(
+            self,
+            "Storage",
+            "SD card storage is not available on this system.",
+        )
+        self._storage_sd_selected = False
+        self._sync_settings_panel_from_state()
 
     def _on_power_clicked(self) -> None:
         if self.camera is not None and self.camera.is_connected:
@@ -537,10 +643,16 @@ class MainWindow(QMainWindow):
 
         try:
             self.statusBar().showMessage("Capturing image...")
+            if self._camera_sound_enabled:
+                QApplication.beep()
+            if self._burst_capture_mode:
+                self.statusBar().showMessage(
+                    "Burst mode is not implemented yet — saved a single frame."
+                )
             # GrabOne after stopping the stream avoids NULL GrabResultPtr with
             # LatestImageOnly + RetrieveResult on some cameras.
             frame = self.camera.grab_still_frame()
-            
+
             if frame is None:
                 self.statusBar().showMessage("Capture failed")
                 QMessageBox.warning(
@@ -551,9 +663,17 @@ class MainWindow(QMainWindow):
                 return
 
             frame = self.image_settings.apply_postprocess(frame)
-            frame = self._apply_view_transforms(frame)
+            if self._export_full_resolution:
+                frame_to_save = frame
+            else:
+                frame_to_save = self._apply_view_transforms(frame)
+                frame_to_save = cv2.resize(
+                    frame_to_save,
+                    (self._preview_width, self._preview_height),
+                    interpolation=cv2.INTER_AREA,
+                )
 
-            result = self._snapshot_writer.save_bgr(frame, prefix="capture")
+            result = self._snapshot_writer.save_bgr(frame_to_save, prefix="capture")
             self.statusBar().showMessage(f"Saved: {result.path.name}")
 
             msg = QMessageBox(self)

@@ -31,16 +31,39 @@ class SnapshotWriter:
     Thread-safety: use from the main / camera thread only unless externally synchronized.
     """
 
-    def __init__(self, base_directory: Path, image_format: str = "png") -> None:
+    def __init__(
+        self,
+        base_directory: Path,
+        image_format: str = "png",
+        jpeg_quality: int = 94,
+    ) -> None:
         fmt = (image_format or "png").lower()
         if fmt == "jpeg":
             fmt = "jpg"
         self._format = fmt
+        self._jpeg_quality = max(1, min(100, int(jpeg_quality)))
         self._base = Path(base_directory)
 
     @property
     def base_directory(self) -> Path:
         return self._base
+
+    @property
+    def image_format(self) -> str:
+        return self._format
+
+    def set_image_format(self, image_format: str) -> None:
+        fmt = (image_format or "png").lower()
+        if fmt == "jpeg":
+            fmt = "jpg"
+        self._format = fmt
+
+    def set_jpeg_quality(self, quality: int) -> None:
+        self._jpeg_quality = max(1, min(100, int(quality)))
+
+    @property
+    def jpeg_quality(self) -> int:
+        return self._jpeg_quality
 
     def save_bgr(
         self,
@@ -80,7 +103,7 @@ class SnapshotWriter:
 
     def _encode_params(self) -> list[int]:
         if self._format in ("jpg", "jpeg"):
-            return [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+            return [int(cv2.IMWRITE_JPEG_QUALITY), self._jpeg_quality]
         if self._format in ("png",):
             return [int(cv2.IMWRITE_PNG_COMPRESSION), 3]
         return []

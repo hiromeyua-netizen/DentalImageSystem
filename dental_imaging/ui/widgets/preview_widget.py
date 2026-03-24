@@ -36,7 +36,19 @@ class PreviewWidget(QLabel):
         
         self.current_frame: Optional[np.ndarray] = None
         self._aspect_ratio: float = 16.0 / 9.0  # Default aspect ratio
-        
+        self._show_grid = False
+        self._show_crosshair = False
+        self._auto_scale_preview = True
+
+    def set_show_grid(self, on: bool) -> None:
+        self._show_grid = bool(on)
+
+    def set_show_crosshair(self, on: bool) -> None:
+        self._show_crosshair = bool(on)
+
+    def set_auto_scale_preview(self, on: bool) -> None:
+        self._auto_scale_preview = bool(on)
+
     def display_frame(self, frame: Optional[np.ndarray]) -> None:
         """
         Display a camera frame.
@@ -57,6 +69,30 @@ class PreviewWidget(QLabel):
         rgb_frame = np.ascontiguousarray(rgb_frame)
 
         h, w, ch = rgb_frame.shape
+        if self._show_crosshair:
+            cx, cy = w // 2, h // 2
+            cv2.line(rgb_frame, (cx, 0), (cx, h - 1), (255, 255, 255), 1)
+            cv2.line(rgb_frame, (0, cy), (w - 1, cy), (255, 255, 255), 1)
+        if self._show_grid:
+            for g in range(1, 8):
+                xi = g * w // 8
+                yi = g * h // 8
+                cv2.line(
+                    rgb_frame,
+                    (xi, 0),
+                    (xi, h - 1),
+                    (72, 72, 80),
+                    1,
+                    cv2.LINE_AA,
+                )
+                cv2.line(
+                    rgb_frame,
+                    (0, yi),
+                    (w - 1, yi),
+                    (72, 72, 80),
+                    1,
+                    cv2.LINE_AA,
+                )
         bytes_per_line = ch * w
         qt_image = QImage(
             rgb_frame.data,
@@ -66,27 +102,33 @@ class PreviewWidget(QLabel):
             QImage.Format.Format_RGB888,
         ).copy()
         
-        # Scale pixmap to fit widget while maintaining aspect ratio
-        # Use FastTransformation for better performance and sharpness
-        # (since we already resized the frame in resize_for_preview)
         pixmap = QPixmap.fromImage(qt_image)
-        
-        # Only scale if the pixmap is larger than widget size
-        # This avoids unnecessary scaling that causes blur
-        if pixmap.width() > self.width() or pixmap.height() > self.height():
-            scaled_pixmap = pixmap.scaled(
-                self.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.FastTransformation  # Faster and sharper for already-resized images
-            )
+        cw, ch_box = max(1, self.width()), max(1, self.height())
+        pw, ph = pixmap.width(), pixmap.height()
+
+        if self._auto_scale_preview:
+            if pw > cw or ph > ch_box:
+                scaled_pixmap = pixmap.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation,
+                )
+            else:
+                scaled_pixmap = pixmap.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
         else:
-            # If pixmap is smaller, use SmoothTransformation for upscaling
-            scaled_pixmap = pixmap.scaled(
-                self.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-        
+            if pw <= cw and ph <= ch_box:
+                scaled_pixmap = pixmap
+            else:
+                scaled_pixmap = pixmap.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.FastTransformation,
+                )
+
         self.setPixmap(scaled_pixmap)
         self.frame_displayed.emit()
     

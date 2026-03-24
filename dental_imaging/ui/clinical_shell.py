@@ -146,7 +146,7 @@ class RightToolRail(QFrame):
     rotate_ccw_clicked = pyqtSignal()
     rotate_cw_clicked = pyqtSignal()
     image_settings_clicked = pyqtSignal(bool)
-    settings_clicked = pyqtSignal()
+    settings_toggled = pyqtSignal(bool)
     capture_clicked = pyqtSignal()
     auto_color_clicked = pyqtSignal()
     recenter_roi_clicked = pyqtSignal()
@@ -220,11 +220,13 @@ class RightToolRail(QFrame):
         self._img_settings.toggled.connect(self.image_settings_clicked.emit)
         row("", "Image settings", self._img_settings)
 
-        b_set = QToolButton()
-        b_set.setText("⚙")
-        b_set.setToolTip("Camera & advanced settings")
-        b_set.clicked.connect(self.settings_clicked.emit)
-        row("", "Settings", b_set)
+        self._settings_btn = QToolButton()
+        self._settings_btn.setText("⚙")
+        self._settings_btn.setToolTip("Settings")
+        self._settings_btn.setCheckable(True)
+        self._settings_btn.setChecked(False)
+        self._settings_btn.toggled.connect(self.settings_toggled.emit)
+        row("", "Settings", self._settings_btn)
 
         self._capture_btn = QToolButton()
         self._capture_btn.setText("📷")
@@ -254,6 +256,9 @@ class RightToolRail(QFrame):
 
     def image_settings_button(self) -> QToolButton:
         return self._img_settings
+
+    def settings_tool_button(self) -> QToolButton:
+        return self._settings_btn
 
     def set_capture_enabled(self, enabled: bool) -> None:
         self._capture_btn.setEnabled(enabled)
@@ -399,11 +404,13 @@ class ClinicalViewport(QWidget):
         preview: PreviewWidget,
         image_settings: ImageSettingsComponent,
         brand_title: str,
+        settings_panel: Optional[QWidget] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
         self._preview = preview
         self._overlay = image_settings
+        self._settings = settings_panel
         self._top = TopStatusBar(brand_title, self)
         self._right = RightToolRail(self)
         self._bottom = BottomControlBar(self)
@@ -413,11 +420,16 @@ class ClinicalViewport(QWidget):
         self._top.setParent(self)
         self._right.setParent(self)
         self._bottom.setParent(self)
+        if self._settings is not None:
+            self._settings.setParent(self)
+            self._settings.hide()
 
         self._top.raise_()
         self._right.raise_()
         self._bottom.raise_()
         image_settings.raise_()
+        if self._settings is not None:
+            self._settings.raise_()
 
     def top_bar(self) -> TopStatusBar:
         return self._top
@@ -431,8 +443,15 @@ class ClinicalViewport(QWidget):
     def preview_widget(self) -> PreviewWidget:
         return self._preview
 
+    def settings_panel(self) -> Optional[QWidget]:
+        return self._settings
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self.layout_chrome()
+
+    def layout_chrome(self) -> None:
+        """Position preview, rails, and floating panels (safe to call when toggling visibility)."""
         w, h = self.width(), self.height()
         th = self._top.height()
         rw = self._right.width()
@@ -443,6 +462,7 @@ class ClinicalViewport(QWidget):
         self._right.setGeometry(w - rw, th, rw, max(0, h - th - bh))
         self._bottom.setGeometry(0, h - bh, w, bh)
 
+        preview_h = max(0, h - th - bh)
         margin = 10
         panel = self._overlay
         panel.adjustSize()
@@ -455,3 +475,25 @@ class ClinicalViewport(QWidget):
         if y + ph > h - bh - margin:
             y = max(th + margin, h - bh - ph - margin)
         panel.move(x, y)
+
+        if self._settings is not None and self._settings.isVisible():
+            margin_s = 12
+            avail_h = max(200, preview_h - 2 * margin_s)
+            self._settings.setMaximumHeight(avail_h)
+            self._settings.adjustSize()
+            sw = self._settings.width()
+            sh = min(self._settings.sizeHint().height(), avail_h)
+            self._settings.resize(sw, sh)
+            sx = max(margin_s, w - rw - sw - margin_s)
+            sy = th + margin_s + max(0, (preview_h - sh) // 2)
+            if sy + sh > h - bh - margin_s:
+                sy = max(th + margin_s, h - bh - sh - margin_s)
+            self._settings.move(sx, sy)
+            self._settings.raise_()
+
+        self._overlay.raise_()
+        if self._settings is not None and self._settings.isVisible():
+            self._settings.raise_()
+        self._top.raise_()
+        self._right.raise_()
+        self._bottom.raise_()
