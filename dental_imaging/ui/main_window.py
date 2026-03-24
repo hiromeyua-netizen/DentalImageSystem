@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QLabel,
     QSlider,
-    QCheckBox,
     QDoubleSpinBox,
     QGroupBox,
     QGridLayout,
@@ -101,6 +100,13 @@ class MainWindow(QMainWindow):
         self.image_settings.settings_changed.connect(
             self._on_image_settings_hardware_push
         )
+        self.image_settings.auto_exposure_changed.connect(
+            self._on_auto_exposure_changed
+        )
+        self.image_settings.auto_gain_changed.connect(self._on_auto_gain_changed)
+        self.image_settings.auto_white_balance_changed.connect(
+            self._on_auto_white_balance_changed
+        )
         self._preview_stack = PreviewStack(
             self.preview_widget,
             self.image_settings,
@@ -111,24 +117,7 @@ class MainWindow(QMainWindow):
         adv_layout = QGridLayout()
         advanced.setLayout(adv_layout)
 
-        self.auto_exposure_checkbox = QCheckBox("Auto exposure")
-        self.auto_exposure_checkbox.setChecked(True)
-        self.auto_exposure_checkbox.stateChanged.connect(self.on_exposure_auto_changed)
-        adv_layout.addWidget(self.auto_exposure_checkbox, 0, 0)
-
-        self.auto_gain_checkbox = QCheckBox("Auto gain")
-        self.auto_gain_checkbox.setChecked(True)
-        self.auto_gain_checkbox.stateChanged.connect(self.on_gain_auto_changed)
-        adv_layout.addWidget(self.auto_gain_checkbox, 0, 1)
-
-        self.white_balance_auto_checkbox = QCheckBox("Auto white balance")
-        self.white_balance_auto_checkbox.setChecked(True)
-        self.white_balance_auto_checkbox.stateChanged.connect(
-            self.on_white_balance_auto_changed
-        )
-        adv_layout.addWidget(self.white_balance_auto_checkbox, 0, 2)
-
-        adv_layout.addWidget(QLabel("Frame rate:"), 1, 0)
+        adv_layout.addWidget(QLabel("Frame rate:"), 0, 0)
         self.frame_rate_spinbox = QDoubleSpinBox()
         self.frame_rate_spinbox.setRange(1.0, 60.0)
         self.frame_rate_spinbox.setValue(30.0)
@@ -136,14 +125,14 @@ class MainWindow(QMainWindow):
         self.frame_rate_spinbox.setSingleStep(1.0)
         self.frame_rate_spinbox.setDecimals(1)
         self.frame_rate_spinbox.valueChanged.connect(self.on_frame_rate_changed)
-        adv_layout.addWidget(self.frame_rate_spinbox, 1, 1)
+        adv_layout.addWidget(self.frame_rate_spinbox, 0, 1)
 
-        adv_layout.addWidget(QLabel("Gamma:"), 1, 2)
+        adv_layout.addWidget(QLabel("Gamma:"), 0, 2)
         self.gamma_slider = QSlider(Qt.Orientation.Horizontal)
         self.gamma_slider.setRange(50, 300)
         self.gamma_slider.setValue(100)
         self.gamma_slider.valueChanged.connect(self.on_gamma_changed)
-        adv_layout.addWidget(self.gamma_slider, 1, 3)
+        adv_layout.addWidget(self.gamma_slider, 0, 3)
 
         self.gamma_spinbox = QDoubleSpinBox()
         self.gamma_spinbox.setRange(0.5, 3.0)
@@ -151,7 +140,7 @@ class MainWindow(QMainWindow):
         self.gamma_spinbox.setSingleStep(0.1)
         self.gamma_spinbox.setDecimals(2)
         self.gamma_spinbox.valueChanged.connect(self.on_gamma_spinbox_changed)
-        adv_layout.addWidget(self.gamma_spinbox, 1, 4)
+        adv_layout.addWidget(self.gamma_spinbox, 0, 4)
 
         main_layout.addWidget(advanced)
         
@@ -209,11 +198,11 @@ class MainWindow(QMainWindow):
         if self._updating_settings or not self.camera or not self.camera.is_connected:
             return
         try:
-            if not self.auto_exposure_checkbox.isChecked():
+            if not self.image_settings.is_auto_exposure():
                 us = self.image_settings.exposure_time_microseconds()
                 self.camera.set_exposure(us, auto=False)
                 self.statusBar().showMessage(f"Exposure: {us / 1000:.1f} ms")
-            if not self.auto_gain_checkbox.isChecked():
+            if not self.image_settings.is_auto_gain():
                 g = self.image_settings.analog_gain()
                 self.camera.set_gain(g, auto=False)
                 self.statusBar().showMessage(f"Gain: {g:.1f}")
@@ -496,8 +485,7 @@ class MainWindow(QMainWindow):
         
         try:
             exp_auto, exp_value = self.camera.get_exposure()
-            self.auto_exposure_checkbox.setChecked(exp_auto)
-            self.image_settings.set_exposure_slider_enabled(not exp_auto)
+            self.image_settings.set_auto_exposure(exp_auto, block_signals=True)
             if not exp_auto and exp_value > 0:
                 self.image_settings.set_exposure_percent(
                     self.image_settings.exposure_percent_from_microseconds(exp_value),
@@ -505,8 +493,7 @@ class MainWindow(QMainWindow):
                 )
 
             gain_auto, gain_value = self.camera.get_gain()
-            self.auto_gain_checkbox.setChecked(gain_auto)
-            self.image_settings.set_gain_slider_enabled(not gain_auto)
+            self.image_settings.set_auto_gain(gain_auto, block_signals=True)
             if not gain_auto:
                 self.image_settings.set_gain_percent(
                     self.image_settings.gain_percent_from_analog(gain_value),
@@ -515,9 +502,10 @@ class MainWindow(QMainWindow):
 
             try:
                 wb_auto = self.camera.get_white_balance()
-                self.white_balance_auto_checkbox.setChecked(wb_auto)
+                self.image_settings.set_auto_white_balance(wb_auto, block_signals=True)
+                self.image_settings.set_auto_white_balance_enabled(True)
             except Exception:
-                self.white_balance_auto_checkbox.setEnabled(False)
+                self.image_settings.set_auto_white_balance_enabled(False)
             
             try:
                 frame_rate = self.camera.get_frame_rate()
@@ -538,56 +526,41 @@ class MainWindow(QMainWindow):
         finally:
             self._updating_settings = False
     
-    def on_exposure_auto_changed(self, state: int) -> None:
-        """Handle exposure auto checkbox change."""
+    def _on_auto_exposure_changed(self, auto: bool) -> None:
         if self._updating_settings or not self.camera or not self.camera.is_connected:
             return
-        
-        auto = state == Qt.CheckState.Checked
-        self.image_settings.set_exposure_slider_enabled(not auto)
-
         if auto:
             try:
                 self.camera.set_exposure(0, auto=True)
-                self.statusBar().showMessage("Exposure: Auto")
+                self.statusBar().showMessage("Exposure: Auto (camera)")
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to set auto-exposure: {e}")
         else:
             self._on_image_settings_hardware_push()
-    
-    def on_gain_auto_changed(self, state: int) -> None:
-        """Handle gain auto checkbox change."""
+
+    def _on_auto_gain_changed(self, auto: bool) -> None:
         if self._updating_settings or not self.camera or not self.camera.is_connected:
             return
-        
-        auto = state == Qt.CheckState.Checked
-        self.image_settings.set_gain_slider_enabled(not auto)
-
         if auto:
             try:
                 self.camera.set_gain(0.0, auto=True)
-                self.statusBar().showMessage("Gain: Auto")
+                self.statusBar().showMessage("Gain: Auto (camera)")
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to set auto-gain: {e}")
         else:
             self._on_image_settings_hardware_push()
-    
-    def on_white_balance_auto_changed(self, state: int) -> None:
-        """Handle white balance auto checkbox change."""
+
+    def _on_auto_white_balance_changed(self, auto: bool) -> None:
         if self._updating_settings or not self.camera or not self.camera.is_connected:
             return
-        
-        auto = state == Qt.CheckState.Checked
-        
         try:
             self.camera.set_white_balance(auto=auto)
-            self.statusBar().showMessage(f"White Balance: {'Auto' if auto else 'Manual'}")
+            self.statusBar().showMessage(
+                f"White balance: {'Auto (camera)' if auto else 'Manual (camera)'}"
+            )
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to set white balance: {e}")
-            # Revert checkbox if failed
-            self.white_balance_auto_checkbox.blockSignals(True)
-            self.white_balance_auto_checkbox.setChecked(not auto)
-            self.white_balance_auto_checkbox.blockSignals(False)
+            self.image_settings.set_auto_white_balance(not auto, block_signals=True)
     
     def on_frame_rate_changed(self, value: float) -> None:
         """Handle frame rate spinbox change."""
