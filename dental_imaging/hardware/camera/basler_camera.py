@@ -232,7 +232,45 @@ class BaslerCamera:
         finally:
             if grab_result is not None:
                 grab_result.Release()
-    
+
+    def grab_still_frame(self, timeout_ms: int = 5000) -> Optional[np.ndarray]:
+        """
+        Capture one full-resolution frame using ``GrabOne``.
+
+        If live preview is running (continuous grab), acquisition is stopped for
+        this shot and then restarted. This avoids ``RetrieveResult`` / NULL
+        ``GrabResultPtr`` issues seen with ``GrabStrategy_LatestImageOnly`` on
+        some Basler models when taking a still while streaming.
+        """
+        if not self.is_connected:
+            raise CameraConnectionError("Camera not connected. Call connect() first.")
+
+        was_grabbing = self.is_grabbing
+        if was_grabbing:
+            self.stop_grabbing()
+
+        grab_result = None
+        try:
+            grab_result = self.camera.GrabOne(timeout_ms)
+            if grab_result is None:
+                return None
+            if not grab_result.GrabSucceeded():
+                return None
+            return grab_result_to_opencv(grab_result)
+        except pylon.TimeoutException:
+            raise CameraGrabError(f"Frame grab timeout after {timeout_ms}ms")
+        except Exception as e:
+            raise CameraGrabError(f"Failed to grab frame: {str(e)}") from e
+        finally:
+            if grab_result is not None:
+                grab_result.Release()
+            if was_grabbing:
+                try:
+                    self.start_grabbing()
+                except Exception:
+                    # Do not mask a successful GrabOne/exception above; user can press Start Preview.
+                    pass
+
     def grab_preview_frame(self, preview_width: int = 1920, preview_height: int = 1080) -> Optional[np.ndarray]:
         """
         Grab a frame and resize it for preview.

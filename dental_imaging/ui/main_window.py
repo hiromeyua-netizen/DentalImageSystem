@@ -402,10 +402,17 @@ class MainWindow(QMainWindow):
             )
             return
         
+        timer_was_running = (
+            self.preview_timer is not None and self.preview_timer.isActive()
+        )
+        if timer_was_running:
+            self.preview_timer.stop()
+
         try:
             self.statusBar().showMessage("Capturing image...")
-            
-            frame = self.camera.grab_frame()
+            # GrabOne after stopping the stream avoids NULL GrabResultPtr with
+            # LatestImageOnly + RetrieveResult on some cameras.
+            frame = self.camera.grab_still_frame()
             
             if frame is None:
                 self.statusBar().showMessage("Capture failed")
@@ -453,6 +460,14 @@ class MainWindow(QMainWindow):
                 f"Unexpected error during capture.\n\n{str(e)}"
             )
             self.statusBar().showMessage("Capture error")
+        finally:
+            if (
+                timer_was_running
+                and self.preview_timer is not None
+                and self.camera is not None
+                and self.camera.is_grabbing
+            ):
+                self.preview_timer.start()
 
     def reconnect_camera(self) -> None:
         """Disconnect and reconnect the camera using the last successful configuration."""
