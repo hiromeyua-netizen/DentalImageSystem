@@ -185,32 +185,6 @@ class MainWindow(QMainWindow):
     def _wire_settings_panel(self) -> None:
         sp = self._settings_panel
 
-        def sync_fps(v: float) -> None:
-            self.frame_rate_spinbox.blockSignals(True)
-            self.frame_rate_spinbox.setValue(v)
-            self.frame_rate_spinbox.blockSignals(False)
-            self.on_frame_rate_changed(v)
-
-        def sync_gamma_slider(v: int) -> None:
-            self.gamma_slider.blockSignals(True)
-            self.gamma_slider.setValue(v)
-            self.gamma_slider.blockSignals(False)
-            self.on_gamma_changed(v)
-
-        def sync_gamma_spin(v: float) -> None:
-            self.gamma_spinbox.blockSignals(True)
-            self.gamma_spinbox.setValue(v)
-            self.gamma_spinbox.blockSignals(False)
-            self.on_gamma_spinbox_changed(v)
-
-        sp.frame_rate_spinbox.valueChanged.connect(sync_fps)
-        sp.gamma_slider.valueChanged.connect(sync_gamma_slider)
-        sp.gamma_spinbox.valueChanged.connect(sync_gamma_spin)
-        sp.start_preview_btn.clicked.connect(self.start_preview)
-        sp.stop_preview_btn.clicked.connect(self.stop_preview)
-        sp.diagnose_btn.clicked.connect(self.diagnose_blur)
-        sp.reconnect_btn.clicked.connect(self.reconnect_camera)
-
         sp.close_requested.connect(self._close_settings_panel)
         sp.show_grid_changed.connect(self._on_show_grid_changed)
         sp.show_crosshair_changed.connect(self._on_show_crosshair_changed)
@@ -250,9 +224,6 @@ class MainWindow(QMainWindow):
             burst_delay_sec=self._burst_delay_sec,
             camera_sound=self._camera_sound_enabled,
             storage_sd_selected=self._storage_sd_selected,
-            frame_rate=self.frame_rate_spinbox.value(),
-            gamma_slider_value=self.gamma_slider.value(),
-            gamma_spin_value=self.gamma_spinbox.value(),
         )
 
     def _on_show_grid_changed(self, on: bool) -> None:
