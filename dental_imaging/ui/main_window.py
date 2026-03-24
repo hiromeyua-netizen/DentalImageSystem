@@ -91,7 +91,7 @@ class MainWindow(QMainWindow):
         self._show_preview_crosshair = False
         self._preview_auto_scale = True
         self._roi_mode_active = False
-        self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)  # B, G, R
 
         self._hidden_tuning = QWidget()
         self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
@@ -164,7 +164,7 @@ class MainWindow(QMainWindow):
         rail.flip_vertical_clicked.connect(self._toggle_flip_v)
         rail.rotate_ccw_clicked.connect(self._rotate_ccw)
         rail.rotate_cw_clicked.connect(self._rotate_cw)
-        rail.auto_color_clicked.connect(self._stub_auto_color)
+        rail.auto_color_clicked.connect(self._on_auto_color_balance)
         rail.recenter_roi_clicked.connect(self._stub_recenter_roi)
         rail.roi_mode_clicked.connect(self._stub_roi_mode)
 
@@ -330,29 +330,36 @@ class MainWindow(QMainWindow):
     def _rotate_cw(self) -> None:
         self._rotate_quarter_turns = (self._rotate_quarter_turns + 1) % 4
 
-    def _stub_auto_color(self) -> None:
+    def _on_auto_color_balance(self) -> None:
         frame = self.preview_widget.current_frame
         if frame is None or frame.size == 0:
-            QMessageBox.information(
-                self,
-                "Auto color balance",
-                "No preview frame available yet.",
-            )
+            self.statusBar().showMessage("Auto color balance: no preview frame available")
             return
+
+        sample = frame
+        source = "full frame"
         roi = self.preview_widget.roi_rect() if self._roi_mode_active else None
-        gains = self._estimate_auto_color_gains(frame, roi)
-        if gains is None:
-            QMessageBox.information(
-                self,
-                "Auto color balance",
-                "Could not estimate color correction from current frame.",
-            )
-            return
-        self._auto_color_gains = gains
+        if roi is not None:
+            x, y, w, h = roi
+            fh, fw = frame.shape[:2]
+            x = max(0, min(x, fw - 1))
+            y = max(0, min(y, fh - 1))
+            w = max(1, min(w, fw - x))
+            h = max(1, min(h, fh - y))
+            crop = frame[y : y + h, x : x + w]
+            if crop.size > 0:
+                sample = crop
+                source = "ROI"
+
+        self._auto_color_gains = self._compute_auto_color_gains(sample)
         self.statusBar().showMessage(
-            f"Auto color balance applied (B:{gains[0]:.2f} G:{gains[1]:.2f} R:{gains[2]:.2f})"
+            f"Auto color balance applied ({source}) — "
+            f"B:{self._auto_color_gains[0]:.2f} G:{self._auto_color_gains[1]:.2f} R:{self._auto_color_gains[2]:.2f}"
         )
-        self._refresh_preview_if_idle()
+        if self.camera is not None and self.camera.is_grabbing:
+            self.update_preview()
+        else:
+            self._redraw_preview_if_possible()
 
     def _stub_recenter_roi(self) -> None:
         if not self._roi_mode_active:
@@ -378,9 +385,7 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_preview_if_idle(self) -> None:
-        if self.preview_timer is not None and self.preview_timer.isActive():
-            return
-        self._redraw_preview_if_possible()
+        pass
 
     def _sync_top_chrome(self) -> None:
         """Keep top status pill, power label, and capture button aligned with camera state."""
@@ -434,46 +439,38 @@ class MainWindow(QMainWindow):
         if bgr is None or bgr.size == 0:
             return bgr
         gains = self._auto_color_gains
-        if np.allclose(gains, [1.0, 1.0, 1.0], atol=1e-3):
+        if gains is None:
             return bgr
-        out = bgr.astype(np.float32)
-        out[:, :, 0] *= float(gains[0])
-        out[:, :, 1] *= float(gains[1])
-        out[:, :, 2] *= float(gains[2])
-        return np.clip(out, 0, 255).astype(np.uint8)
+        if np.allclose(gains, 1.0, atol=1e-3):
+            return bgr
+        f = bgr.astype(np.float32)
+        f[:, :, 0] *= float(gains[0])
+        f[:, :, 1] *= float(gains[1])
+        f[:, :, 2] *= float(gains[2])
+        return np.clip(f, 0, 255).astype(np.uint8)
 
-    @staticmethod
-    def _estimate_auto_color_gains(
-        bgr: np.ndarray, roi: Optional[tuple[int, int, int, int]] = None
-    ) -> Optional[np.ndarray]:
+    def _compute_auto_color_gains(self, bgr: np.ndarray) -> np.ndarray:
+        """
+        Robust gray-world gains from a frame or ROI.
+        Uses clipped luminance range to avoid highlights/shadows biasing the result.
+        """
         if bgr is None or bgr.size == 0:
-            return None
-        sample = bgr
-        if roi is not None:
-            x, y, w, h = roi
-            fh, fw = bgr.shape[:2]
-            x = max(0, min(int(x), fw - 1))
-            y = max(0, min(int(y), fh - 1))
-            w = max(1, min(int(w), fw - x))
-            h = max(1, min(int(h), fh - y))
-            sample = bgr[y : y + h, x : x + w]
-        if sample.size == 0:
-            return None
-        pixels = sample.reshape(-1, 3).astype(np.float32)
-        if pixels.shape[0] < 32:
-            return None
-        lo = np.percentile(pixels, 5.0, axis=0)
-        hi = np.percentile(pixels, 95.0, axis=0)
-        mask = np.logical_and(pixels >= lo, pixels <= hi).all(axis=1)
-        clipped = pixels[mask] if int(mask.sum()) >= 32 else pixels
-        means = clipped.mean(axis=0)
-        if np.any(means <= 1e-3):
-            return None
+            return np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        px = bgr.reshape(-1, 3).astype(np.float32)
+        if px.shape[0] < 50:
+            return np.array([1.0, 1.0, 1.0], dtype=np.float32)
+
+        luma = 0.114 * px[:, 0] + 0.587 * px[:, 1] + 0.299 * px[:, 2]
+        lo, hi = np.percentile(luma, [5, 95])
+        mask = (luma >= lo) & (luma <= hi)
+        if int(mask.sum()) >= 50:
+            px = px[mask]
+
+        means = np.maximum(px.mean(axis=0), 1.0)
         target = float(np.mean(means))
         gains = target / means
-        gains = gains / max(1e-6, float(np.mean(gains)))
-        gains = np.clip(gains, 0.70, 1.40).astype(np.float32)
-        return gains
+        gains = np.clip(gains, 0.70, 1.40)
+        return gains.astype(np.float32)
 
     def _update_stream_stats(self, frame_w: int, frame_h: int) -> None:
         interval_ms = max(1, self.preview_timer.interval())
