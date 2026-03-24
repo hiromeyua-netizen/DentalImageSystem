@@ -76,6 +76,9 @@ class MainWindow(QMainWindow):
         self.camera_config: Optional[CameraConfig] = None
         self.preview_timer: Optional[QTimer] = None
         self.image_settings = ImageSettingsComponent()
+        # After Reset, or while camera reports AE/AGC, we skip pushing manual slider values.
+        self._camera_auto_exposure = True
+        self._camera_auto_gain = True
 
         self._setup_ui()
         self._setup_timers()
@@ -100,12 +103,14 @@ class MainWindow(QMainWindow):
         self.image_settings.settings_changed.connect(
             self._on_image_settings_hardware_push
         )
-        self.image_settings.auto_exposure_changed.connect(
-            self._on_auto_exposure_changed
+        self.image_settings.defaults_restored.connect(
+            self._on_image_settings_defaults_restored
         )
-        self.image_settings.auto_gain_changed.connect(self._on_auto_gain_changed)
-        self.image_settings.auto_white_balance_changed.connect(
-            self._on_auto_white_balance_changed
+        self.image_settings.exposure_slider_user_changed.connect(
+            self._on_exposure_slider_manual
+        )
+        self.image_settings.gain_slider_user_changed.connect(
+            self._on_gain_slider_manual
         )
         self._preview_stack = PreviewStack(
             self.preview_widget,
@@ -194,24 +199,51 @@ class MainWindow(QMainWindow):
         self.preview_timer.setInterval(max(1, int(round(1000.0 / fps))))
 
     def _on_image_settings_hardware_push(self) -> None:
-        """Apply exposure/gain sliders to the camera when not in auto mode."""
+        """Apply exposure/gain sliders when those channels are in manual mode."""
         if self._updating_settings or not self.camera or not self.camera.is_connected:
             return
         try:
-            if not self.image_settings.is_auto_exposure():
+            if not self._camera_auto_exposure:
                 us = self.image_settings.exposure_time_microseconds()
                 self.camera.set_exposure(us, auto=False)
-                self.statusBar().showMessage(f"Exposure: {us / 1000:.1f} ms")
-            if not self.image_settings.is_auto_gain():
+                self.statusBar().showMessage(f"Exposure: {us / 1000:.1f} ms (manual)")
+            if not self._camera_auto_gain:
                 g = self.image_settings.analog_gain()
                 self.camera.set_gain(g, auto=False)
-                self.statusBar().showMessage(f"Gain: {g:.1f}")
+                self.statusBar().showMessage(f"Gain: {g:.1f} (manual)")
         except Exception as e:
             QMessageBox.warning(
                 self,
                 "Camera",
                 f"Could not apply exposure or gain.\n\n{str(e)}",
             )
+
+    def _on_image_settings_defaults_restored(self) -> None:
+        """Match previous 'all Auto on': AE, AGC, AWB, neutral sliders."""
+        self._camera_auto_exposure = True
+        self._camera_auto_gain = True
+        if not self.camera or not self.camera.is_connected:
+            self.statusBar().showMessage("Image settings reset (connect camera to apply auto modes)")
+            return
+        try:
+            self.camera.set_exposure(0, auto=True)
+            self.camera.set_gain(0.0, auto=True)
+            self.camera.set_white_balance(auto=True)
+            self.statusBar().showMessage(
+                "Image settings reset — auto exposure, gain, and white balance"
+            )
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Camera",
+                f"Could not restore automatic exposure, gain, or white balance.\n\n{str(e)}",
+            )
+
+    def _on_exposure_slider_manual(self) -> None:
+        self._camera_auto_exposure = False
+
+    def _on_gain_slider_manual(self) -> None:
+        self._camera_auto_gain = False
 
     def initialize_camera(self, config: CameraConfig) -> bool:
         """
@@ -485,7 +517,7 @@ class MainWindow(QMainWindow):
         
         try:
             exp_auto, exp_value = self.camera.get_exposure()
-            self.image_settings.set_auto_exposure(exp_auto, block_signals=True)
+            self._camera_auto_exposure = exp_auto
             if not exp_auto and exp_value > 0:
                 self.image_settings.set_exposure_percent(
                     self.image_settings.exposure_percent_from_microseconds(exp_value),
@@ -493,19 +525,13 @@ class MainWindow(QMainWindow):
                 )
 
             gain_auto, gain_value = self.camera.get_gain()
-            self.image_settings.set_auto_gain(gain_auto, block_signals=True)
+            self._camera_auto_gain = gain_auto
             if not gain_auto:
                 self.image_settings.set_gain_percent(
                     self.image_settings.gain_percent_from_analog(gain_value),
                     block_signals=True,
                 )
 
-            try:
-                wb_auto = self.camera.get_white_balance()
-                self.image_settings.set_auto_white_balance(wb_auto, block_signals=True)
-                self.image_settings.set_auto_white_balance_enabled(True)
-            except Exception:
-                self.image_settings.set_auto_white_balance_enabled(False)
             
             try:
                 frame_rate = self.camera.get_frame_rate()
@@ -525,42 +551,6 @@ class MainWindow(QMainWindow):
             
         finally:
             self._updating_settings = False
-    
-    def _on_auto_exposure_changed(self, auto: bool) -> None:
-        if self._updating_settings or not self.camera or not self.camera.is_connected:
-            return
-        if auto:
-            try:
-                self.camera.set_exposure(0, auto=True)
-                self.statusBar().showMessage("Exposure: Auto (camera)")
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to set auto-exposure: {e}")
-        else:
-            self._on_image_settings_hardware_push()
-
-    def _on_auto_gain_changed(self, auto: bool) -> None:
-        if self._updating_settings or not self.camera or not self.camera.is_connected:
-            return
-        if auto:
-            try:
-                self.camera.set_gain(0.0, auto=True)
-                self.statusBar().showMessage("Gain: Auto (camera)")
-            except Exception as e:
-                QMessageBox.warning(self, "Error", f"Failed to set auto-gain: {e}")
-        else:
-            self._on_image_settings_hardware_push()
-
-    def _on_auto_white_balance_changed(self, auto: bool) -> None:
-        if self._updating_settings or not self.camera or not self.camera.is_connected:
-            return
-        try:
-            self.camera.set_white_balance(auto=auto)
-            self.statusBar().showMessage(
-                f"White balance: {'Auto (camera)' if auto else 'Manual (camera)'}"
-            )
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to set white balance: {e}")
-            self.image_settings.set_auto_white_balance(not auto, block_signals=True)
     
     def on_frame_rate_changed(self, value: float) -> None:
         """Handle frame rate spinbox change."""

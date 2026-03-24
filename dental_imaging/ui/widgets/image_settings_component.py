@@ -1,9 +1,9 @@
 """
 Self-contained Image Settings UI + processing + hardware mapping.
 
-Use this as the single integration point wherever live view or capture needs
-image tuning. The main window (or other hosts) only wires camera I/O and
-preview/capture pipelines; all slider semantics and post-processing live here.
+Reset restores camera automatic exposure, gain, and white balance (same effect as
+the former Auto checkboxes). Moving the exposure or gain slider switches that
+parameter to manual until the next Reset.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import numpy as np
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractButton,
-    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -48,26 +47,33 @@ class ImageSettingsHardwareRange:
 
 class ImageSettingsComponent(QFrame):
     """
-    Floating panel: auto toggles for exposure / gain / white balance, plus seven sliders.
-
-    Exposure & gain sliders apply to the camera when the matching Auto option is off.
-    White Balance slider is software (tint) on top of the camera; Auto uses camera AWB.
+    Seven sliders for image tuning. Reset sets neutral sliders and signals the host
+    to restore camera auto exposure, gain, and white balance.
     """
 
     settings_changed = pyqtSignal()
     panel_closed = pyqtSignal()
-    #: ``True`` = camera auto mode enabled for that channel.
-    auto_exposure_changed = pyqtSignal(bool)
-    auto_gain_changed = pyqtSignal(bool)
-    auto_white_balance_changed = pyqtSignal(bool)
+    #: Emitted after Reset (sliders at 50%); host should set camera AE/AGC/AWB on.
+    defaults_restored = pyqtSignal()
+    #: User moved the exposure slider (not a programmatic sync).
+    exposure_slider_user_changed = pyqtSignal()
+    #: User moved the gain slider (not a programmatic sync).
+    gain_slider_user_changed = pyqtSignal()
 
-    DEFAULT_PANEL_WIDTH = 380
+    DEFAULT_PANEL_WIDTH = 360
 
-    _SLIDER_ONLY_ROWS: Tuple[Tuple[str, str], ...] = (
-        ("Contrast", "contrast"),
-        ("Saturation", "saturation"),
-        ("Warmth", "warmth"),
-        ("Tint", "tint"),
+    _ROW_META: Tuple[Tuple[str, str, str], ...] = (
+        ("Exposure", "exposure", "Adjust brightness timing. Reset restores automatic exposure on the camera."),
+        ("Gain", "gain", "Adjust analog gain. Reset restores automatic gain on the camera."),
+        (
+            "White Balance",
+            "white_balance",
+            "Software color balance. Reset restores automatic white balance on the camera.",
+        ),
+        ("Contrast", "contrast", ""),
+        ("Saturation", "saturation", ""),
+        ("Warmth", "warmth", ""),
+        ("Tint", "tint", ""),
     )
 
     def __init__(
@@ -96,17 +102,11 @@ class ImageSettingsComponent(QFrame):
                 color: #555;
                 font-size: 11px;
             }
-            QCheckBox {
-                font-size: 12px;
-            }
             """
         )
 
         self._sliders: Dict[str, QSlider] = {}
         self._labels: Dict[str, QLabel] = {}
-        self._auto_exposure: QCheckBox
-        self._auto_gain: QCheckBox
-        self._auto_white_balance: QCheckBox
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 14)
@@ -120,7 +120,9 @@ class ImageSettingsComponent(QFrame):
 
         reset_btn = QPushButton("Reset")
         reset_btn.setFlat(True)
-        reset_btn.setToolTip("Set all sliders to 50% and turn Auto on for exposure, gain, and white balance")
+        reset_btn.setToolTip(
+            "Neutral sliders and automatic exposure, gain, and white balance on the camera"
+        )
         reset_btn.clicked.connect(self.reset_to_defaults)
         header.addWidget(reset_btn)
 
@@ -133,85 +135,32 @@ class ImageSettingsComponent(QFrame):
         root.addLayout(header)
 
         hint = QLabel(
-            "Auto: camera adjusts the image. Turn Auto off to control that row with the slider."
+            "Reset matches turning on automatic exposure, gain, and white balance on the camera. "
+            "Moving Exposure or Gain switches that control to manual until you reset."
         )
         hint.setObjectName("imageSettingsHint")
         hint.setWordWrap(True)
         root.addWidget(hint)
 
-        self._auto_exposure = QCheckBox("Auto")
-        self._auto_exposure.setToolTip(
-            "Camera chooses exposure time. Turn off to set exposure with the slider below."
-        )
-        self._auto_exposure.setChecked(True)
-        self._auto_exposure.toggled.connect(self._on_auto_exposure_toggled)
-        self._add_slider_row_with_auto(
-            root, "Exposure", "exposure", self._auto_exposure
-        )
-
-        self._auto_gain = QCheckBox("Auto")
-        self._auto_gain.setToolTip(
-            "Camera chooses gain. Turn off to set gain with the slider below."
-        )
-        self._auto_gain.setChecked(True)
-        self._auto_gain.toggled.connect(self._on_auto_gain_toggled)
-        self._add_slider_row_with_auto(root, "Gain", "gain", self._auto_gain)
-
-        self._auto_white_balance = QCheckBox("Auto")
-        self._auto_white_balance.setToolTip(
-            "Camera white balance (continuous). Turn off for fixed WB; use the slider for fine color tuning."
-        )
-        self._auto_white_balance.setChecked(True)
-        self._auto_white_balance.toggled.connect(self._on_auto_white_balance_toggled)
-        self._add_slider_row_with_auto(
-            root, "White Balance", "white_balance", self._auto_white_balance
-        )
-
-        for label_text, key in self._SLIDER_ONLY_ROWS:
-            self._add_slider_row_only(root, label_text, key)
+        for label_text, key, tip in self._ROW_META:
+            self._add_slider_row(root, label_text, key, tip or None)
 
         self.setFixedWidth(self.DEFAULT_PANEL_WIDTH)
 
-    def _add_slider_row_with_auto(
+    def _add_slider_row(
         self,
         root: QVBoxLayout,
         title: str,
         key: str,
-        auto_cb: QCheckBox,
+        tooltip: Optional[str],
     ) -> None:
         block = QVBoxLayout()
         block.setSpacing(2)
         top = QHBoxLayout()
         name = QLabel(title)
+        if tooltip:
+            name.setToolTip(tooltip)
         top.addWidget(name)
-        top.addStretch()
-        top.addWidget(auto_cb)
-        block.addLayout(top)
-
-        pct = QLabel("50%")
-        pct.setMinimumWidth(40)
-        pct.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        label_row = QHBoxLayout()
-        label_row.addStretch()
-        label_row.addWidget(pct)
-        block.addLayout(label_row)
-
-        slider = QSlider(Qt.Orientation.Horizontal)
-        slider.setRange(0, 100)
-        slider.setValue(50)
-        slider.setTracking(True)
-        slider.setEnabled(not auto_cb.isChecked())
-        slider.valueChanged.connect(self._make_slider_handler(pct))
-        self._sliders[key] = slider
-        self._labels[key] = pct
-        block.addWidget(slider)
-        root.addLayout(block)
-
-    def _add_slider_row_only(self, root: QVBoxLayout, title: str, key: str) -> None:
-        block = QVBoxLayout()
-        block.setSpacing(2)
-        top = QHBoxLayout()
-        top.addWidget(QLabel(title))
         top.addStretch()
         pct = QLabel("50%")
         pct.setMinimumWidth(40)
@@ -223,7 +172,9 @@ class ImageSettingsComponent(QFrame):
         slider.setRange(0, 100)
         slider.setValue(50)
         slider.setTracking(True)
-        slider.valueChanged.connect(self._make_slider_handler(pct))
+        if tooltip:
+            slider.setToolTip(tooltip)
+        slider.valueChanged.connect(self._make_slider_handler(key, pct))
         self._sliders[key] = slider
         self._labels[key] = pct
         block.addWidget(slider)
@@ -233,20 +184,13 @@ class ImageSettingsComponent(QFrame):
     def hardware_range(self) -> ImageSettingsHardwareRange:
         return self._hw
 
-    def _on_auto_exposure_toggled(self, auto_on: bool) -> None:
-        self._sliders["exposure"].setEnabled(not auto_on)
-        self.auto_exposure_changed.emit(auto_on)
-
-    def _on_auto_gain_toggled(self, auto_on: bool) -> None:
-        self._sliders["gain"].setEnabled(not auto_on)
-        self.auto_gain_changed.emit(auto_on)
-
-    def _on_auto_white_balance_toggled(self, auto_on: bool) -> None:
-        self.auto_white_balance_changed.emit(auto_on)
-
-    def _make_slider_handler(self, pct_label: QLabel) -> Callable[[int], None]:
+    def _make_slider_handler(self, key: str, pct_label: QLabel) -> Callable[[int], None]:
         def _on(v: int) -> None:
             pct_label.setText(f"{v}%")
+            if key == "exposure":
+                self.exposure_slider_user_changed.emit()
+            elif key == "gain":
+                self.gain_slider_user_changed.emit()
             self.settings_changed.emit()
 
         return _on
@@ -255,71 +199,19 @@ class ImageSettingsComponent(QFrame):
         self.hide()
         self.panel_closed.emit()
 
-    def is_auto_exposure(self) -> bool:
-        return self._auto_exposure.isChecked()
-
-    def is_auto_gain(self) -> bool:
-        return self._auto_gain.isChecked()
-
-    def is_auto_white_balance(self) -> bool:
-        return self._auto_white_balance.isChecked()
-
-    def set_auto_exposure(self, value: bool, *, block_signals: bool = False) -> None:
-        if block_signals:
-            self._auto_exposure.blockSignals(True)
-        try:
-            self._auto_exposure.setChecked(value)
-            self._sliders["exposure"].setEnabled(not value)
-        finally:
-            if block_signals:
-                self._auto_exposure.blockSignals(False)
-
-    def set_auto_gain(self, value: bool, *, block_signals: bool = False) -> None:
-        if block_signals:
-            self._auto_gain.blockSignals(True)
-        try:
-            self._auto_gain.setChecked(value)
-            self._sliders["gain"].setEnabled(not value)
-        finally:
-            if block_signals:
-                self._auto_gain.blockSignals(False)
-
-    def set_auto_white_balance(self, value: bool, *, block_signals: bool = False) -> None:
-        if block_signals:
-            self._auto_white_balance.blockSignals(True)
-        try:
-            self._auto_white_balance.setChecked(value)
-        finally:
-            if block_signals:
-                self._auto_white_balance.blockSignals(False)
-
-    def set_auto_white_balance_enabled(self, enabled: bool) -> None:
-        self._auto_white_balance.setEnabled(enabled)
-
     def reset_to_defaults(self) -> None:
-        """Sliders to 50%; Auto on for exposure, gain, and white balance."""
+        """All sliders to 50%; notify host to enable camera AE, AGC, and AWB."""
         for s in self._sliders.values():
             s.blockSignals(True)
-        for cb in (self._auto_exposure, self._auto_gain, self._auto_white_balance):
-            cb.blockSignals(True)
         try:
             for s in self._sliders.values():
                 s.setValue(50)
             for lbl in self._labels.values():
                 lbl.setText("50%")
-            self._auto_exposure.setChecked(True)
-            self._auto_gain.setChecked(True)
-            self._auto_white_balance.setChecked(True)
-            self._sliders["exposure"].setEnabled(False)
-            self._sliders["gain"].setEnabled(False)
         finally:
-            for cb in (self._auto_exposure, self._auto_gain, self._auto_white_balance):
-                cb.blockSignals(False)
             for s in self._sliders.values():
                 s.blockSignals(False)
-        self.auto_exposure_changed.emit(True)
-        self.auto_gain_changed.emit(True)
-        self.auto_white_balance_changed.emit(True)
+        self.defaults_restored.emit()
         self.settings_changed.emit()
 
     def get_values(self) -> ImageSettingsPercent:
