@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
 
         rail = self._clinical.right_rail()
         self.image_settings.wire_toggle_button(rail.image_settings_button())
+        rail.image_settings_button().toggled.connect(self._on_image_settings_toggled)
         rail.capture_clicked.connect(self.capture_image)
         rail.settings_toggled.connect(self._on_settings_toggled)
         self._clinical.top_bar().power_clicked.connect(self._on_power_clicked)
@@ -212,6 +213,16 @@ class MainWindow(QMainWindow):
             self._settings_panel.hide()
             if rail.image_settings_button().isChecked():
                 self.image_settings.show()
+        self._clinical.layout_chrome()
+
+    def _on_image_settings_toggled(self, open_: bool) -> None:
+        """Keep Settings and Image Settings mutually exclusive."""
+        if not open_:
+            return
+        settings_btn = self._clinical.right_rail().settings_tool_button()
+        if settings_btn.isChecked():
+            settings_btn.setChecked(False)
+        self._settings_panel.hide()
         self._clinical.layout_chrome()
 
     def _close_settings_panel(self) -> None:
