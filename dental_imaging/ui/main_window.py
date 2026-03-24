@@ -90,6 +90,7 @@ class MainWindow(QMainWindow):
         self._show_preview_grid = False
         self._show_preview_crosshair = False
         self._preview_auto_scale = True
+        self._roi_mode_active = False
 
         self._hidden_tuning = QWidget()
         self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
@@ -163,10 +164,8 @@ class MainWindow(QMainWindow):
         rail.rotate_ccw_clicked.connect(self._rotate_ccw)
         rail.rotate_cw_clicked.connect(self._rotate_cw)
         rail.auto_color_clicked.connect(self._stub_auto_color)
-        rail.recenter_roi_clicked.connect(self._on_recenter_roi_clicked)
-        rail.roi_mode_toggled.connect(self._on_roi_mode_toggled)
-
-        self.preview_widget.roi_changed.connect(self._on_roi_changed)
+        rail.recenter_roi_clicked.connect(self._stub_recenter_roi)
+        rail.roi_mode_clicked.connect(self._stub_roi_mode)
 
         bb = self._clinical.bottom_bar()
         bb.brightness_changed.connect(lambda _v: self._refresh_preview_if_idle())
@@ -337,22 +336,20 @@ class MainWindow(QMainWindow):
             "This tool will be available in a future update.",
         )
 
-    def _on_recenter_roi_clicked(self) -> None:
+    def _stub_recenter_roi(self) -> None:
+        if not self._roi_mode_active:
+            self.statusBar().showMessage("Enable ROI mode first")
+            return
         self.preview_widget.recenter_roi()
         self.statusBar().showMessage("ROI recentered")
 
-    def _on_roi_mode_toggled(self, enabled: bool) -> None:
-        self.preview_widget.set_roi_mode(enabled)
-        if enabled:
-            self.statusBar().showMessage(
-                "ROI mode enabled: drag to draw, drag corners to resize, drag inside to move"
-            )
-        else:
-            self.statusBar().showMessage("ROI mode disabled")
-
-    def _on_roi_changed(self, x: float, y: float, w: float, h: float) -> None:
+    def _stub_roi_mode(self) -> None:
+        self._roi_mode_active = not self._roi_mode_active
+        self.preview_widget.set_roi_mode(self._roi_mode_active)
         self.statusBar().showMessage(
-            f"ROI: x={x:.2f}, y={y:.2f}, w={w:.2f}, h={h:.2f}"
+            "ROI mode enabled - drag to draw/edit box"
+            if self._roi_mode_active
+            else "ROI mode disabled"
         )
 
     def _on_preset_clicked(self, index: int) -> None:

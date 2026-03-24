@@ -151,7 +151,6 @@ class RightToolRail(QFrame):
     auto_color_clicked = pyqtSignal()
     recenter_roi_clicked = pyqtSignal()
     roi_mode_clicked = pyqtSignal()
-    roi_mode_toggled = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -247,13 +246,11 @@ class RightToolRail(QFrame):
         b_roi0.clicked.connect(self.recenter_roi_clicked.emit)
         row("", "Recenter ROI", b_roi0)
 
-        self._roi_btn = QToolButton()
-        self._roi_btn.setText("▢")
-        self._roi_btn.setToolTip("ROI mode (1-finger box)")
-        self._roi_btn.setCheckable(True)
-        self._roi_btn.toggled.connect(self.roi_mode_toggled.emit)
-        self._roi_btn.clicked.connect(self.roi_mode_clicked.emit)
-        row("", "ROI mode (1 finger box)", self._roi_btn)
+        b_roi = QToolButton()
+        b_roi.setText("▢")
+        b_roi.setToolTip("ROI mode (1-finger box)")
+        b_roi.clicked.connect(self.roi_mode_clicked.emit)
+        row("", "ROI mode (1 finger box)", b_roi)
 
         root.addStretch(1)
 
@@ -262,9 +259,6 @@ class RightToolRail(QFrame):
 
     def settings_tool_button(self) -> QToolButton:
         return self._settings_btn
-
-    def roi_mode_button(self) -> QToolButton:
-        return self._roi_btn
 
     def set_capture_enabled(self, enabled: bool) -> None:
         self._capture_btn.setEnabled(enabled)
