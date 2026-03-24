@@ -1,5 +1,5 @@
 """
-Responsive floating settings panel for the clinical shell.
+Settings panel styled to match the clinical reference.
 """
 
 from __future__ import annotations
@@ -14,54 +14,45 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSlider,
     QVBoxLayout,
-    QWidget,
 )
-
-
-def _title(text: str) -> QLabel:
-    w = QLabel(text)
-    w.setStyleSheet("color: rgba(255,255,255,0.95); font-size: 28px; font-weight: 700;")
-    return w
 
 
 def _section(text: str) -> QLabel:
     w = QLabel(text)
-    w.setStyleSheet("color: rgba(255,255,255,0.92); font-size: 16px; font-weight: 600;")
+    w.setStyleSheet("color: rgba(255,255,255,0.92); font-size: 12px; font-weight: 700;")
     return w
 
 
 def _label(text: str) -> QLabel:
     w = QLabel(text)
-    w.setStyleSheet("color: rgba(255,255,255,0.88); font-size: 14px;")
+    w.setStyleSheet("color: rgba(255,255,255,0.88); font-size: 11px;")
     return w
 
 
-def _value(text: str, bold: bool = False) -> QLabel:
-    wt = 650 if bold else 500
+def _value(text: str, weight: int = 600) -> QLabel:
     w = QLabel(text)
     w.setStyleSheet(
-        f"color: rgba(255,255,255,0.9); font-size: 14px; font-weight: {wt};"
+        f"color: rgba(255,255,255,0.90); font-size: 11px; font-weight: {weight};"
     )
     return w
 
 
-def _toggle_switch() -> QCheckBox:
+def _toggle() -> QCheckBox:
     cb = QCheckBox()
     cb.setCursor(Qt.CursorShape.PointingHandCursor)
     cb.setStyleSheet(
         """
         QCheckBox::indicator {
-            width: 62px;
-            height: 30px;
-            border-radius: 15px;
-            background: rgba(255,255,255,0.28);
-            border: 1px solid rgba(255,255,255,0.35);
+            width: 42px;
+            height: 22px;
+            border-radius: 11px;
+            background: rgba(255,255,255,0.32);
+            border: 1px solid rgba(255,255,255,0.30);
         }
         QCheckBox::indicator:checked {
-            background: rgba(255,255,255,0.56);
+            background: rgba(255,255,255,0.62);
             border-color: rgba(255,255,255,0.45);
         }
         """
@@ -69,26 +60,25 @@ def _toggle_switch() -> QCheckBox:
     return cb
 
 
-def _pill_button(text: str) -> QPushButton:
+def _pill(text: str) -> QPushButton:
     b = QPushButton(text)
     b.setCheckable(True)
     b.setCursor(Qt.CursorShape.PointingHandCursor)
     b.setStyleSheet(
         """
         QPushButton {
-            min-height: 34px;
-            border-radius: 17px;
-            border: 1px solid rgba(255,255,255,0.6);
-            background: rgba(255,255,255,0.14);
-            color: rgba(255,255,255,0.9);
-            font-size: 13px;
+            min-height: 26px;
+            border-radius: 13px;
+            border: 1px solid rgba(255,255,255,0.58);
+            background: rgba(255,255,255,0.12);
+            color: rgba(255,255,255,0.92);
+            font-size: 10px;
             font-weight: 600;
-            padding: 0 14px;
+            padding: 0 10px;
         }
         QPushButton:checked {
-            background: rgba(255,255,255,0.26);
-            border-color: rgba(255,255,255,0.8);
-            color: #ffffff;
+            background: rgba(255,255,255,0.22);
+            border-color: rgba(255,255,255,0.78);
         }
         """
     )
@@ -110,115 +100,76 @@ class ClinicalSettingsPanel(QFrame):
     storage_target_changed = pyqtSignal(str)  # system | sd
     sd_card_requested = pyqtSignal()
 
-    def __init__(self, app_name: str, app_version: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, app_name: str, app_version: str, parent: Optional[QFrame] = None) -> None:
         super().__init__(parent)
         self._app_name = app_name
         self._app_version = app_version
-        self._base_width = 430
-        self._content_scale = 1.0
 
         self.setObjectName("ClinicalSettingsPanel")
         self.setStyleSheet(
             """
             QFrame#ClinicalSettingsPanel {
-                background: rgba(125, 100, 100, 0.52);
-                border: 1px solid rgba(255,255,255,0.22);
-                border-radius: 18px;
-            }
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
-            QScrollArea > QWidget > QWidget {
-                background: transparent;
+                background: rgba(164, 132, 132, 0.48);
+                border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 16px;
             }
             """
         )
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 14, 18, 16)
+        root.setContentsMargins(16, 12, 16, 12)
         root.setSpacing(8)
 
+        # header
         hdr = QHBoxLayout()
-        self._title = _title("Settings")
+        title = QLabel("Settings")
+        title.setStyleSheet("color: rgba(255,255,255,0.96); font-size: 17px; font-weight: 700;")
         close_btn = QPushButton("X")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setFlat(True)
         close_btn.setStyleSheet(
-            "QPushButton { color:#fff; font-size: 20px; font-weight:700; border:none; }"
+            "QPushButton { color: rgba(255,255,255,0.92); font-size: 16px; font-weight: 700; border: none; }"
         )
         close_btn.clicked.connect(self.close_requested.emit)
-        hdr.addWidget(self._title)
+        hdr.addWidget(title)
         hdr.addStretch(1)
         hdr.addWidget(close_btn)
         root.addLayout(hdr)
 
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-
-        body = QWidget()
-        self._body_layout = QVBoxLayout(body)
-        self._body_layout.setContentsMargins(0, 4, 4, 8)
-        self._body_layout.setSpacing(10)
-
-        self._build_display_section()
-        self._build_capture_section()
-        self._build_storage_section()
-        self._build_about_section()
-        self._body_layout.addStretch(1)
-
-        self._scroll.setWidget(body)
-        root.addWidget(self._scroll, 1)
-
-        # hidden controls maintain existing setting data flow
-        self._quality_slider = QSlider(Qt.Orientation.Horizontal, self)
-        self._quality_slider.setRange(60, 100)
-        self._quality_slider.setValue(94)
-        self._quality_slider.valueChanged.connect(self._on_quality_slider)
-        self._led_slider = QSlider(Qt.Orientation.Horizontal, self)
-        self._led_slider.setRange(0, 100)
-        self._led_slider.setValue(50)
-        self._led_slider.valueChanged.connect(self._on_led_slider)
-
-    def _build_display_section(self) -> None:
-        self._body_layout.addWidget(_section("Display"))
-        self._body_layout.addLayout(self._toggle_row("Show Grid Overlay", "grid"))
-        self._body_layout.addLayout(self._toggle_row("Show Crosshair", "crosshair"))
+        # display
+        root.addWidget(_section("Display"))
+        root.addLayout(self._toggle_row("Show Grid Overlay", "grid"))
+        root.addLayout(self._toggle_row("Show Crosshair", "crosshair"))
         auto_row = self._toggle_row("Auto Scale Preview", "autoscale")
         self.auto_scale_toggle.setChecked(True)
-        self._body_layout.addLayout(auto_row)
+        root.addLayout(auto_row)
 
-    def _build_capture_section(self) -> None:
-        self._body_layout.addSpacing(4)
-        self._body_layout.addWidget(_section("Capture"))
+        # capture
+        root.addSpacing(2)
+        root.addWidget(_section("Capture"))
+        cap_hdr = QHBoxLayout()
+        cap_hdr.addStretch(1)
+        cap_hdr.addWidget(_value("PREVIEW", 700))
+        cap_hdr.addStretch(1)
+        cap_hdr.addWidget(_value("Export All", 700))
+        cap_hdr.addStretch(1)
+        root.addLayout(cap_hdr)
 
-        scope_head = QHBoxLayout()
-        scope_head.addStretch(1)
-        scope_head.addWidget(_value("PREVIEW", bold=True))
-        scope_head.addStretch(1)
-        scope_head.addWidget(_value("Export All", bold=True))
-        scope_head.addStretch(1)
-        self._body_layout.addLayout(scope_head)
-
-        scope_row = QHBoxLayout()
+        cap_sel = QHBoxLayout()
         self.preview_radio = QPushButton()
         self.full_radio = QPushButton()
         for b in (self.preview_radio, self.full_radio):
             b.setCheckable(True)
-            b.setFixedSize(24, 24)
+            b.setFixedSize(18, 18)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setStyleSheet(
                 """
                 QPushButton {
-                    border-radius: 12px;
-                    border: 2px solid rgba(255,255,255,0.86);
-                    background: rgba(255,255,255,0.16);
+                    border-radius: 9px;
+                    border: 2px solid rgba(255,255,255,0.8);
+                    background: rgba(255,255,255,0.12);
                 }
-                QPushButton:checked {
-                    background: rgba(255,255,255,0.92);
-                }
+                QPushButton:checked { background: rgba(255,255,255,0.88); }
                 """
             )
         grp_scope = QButtonGroup(self)
@@ -230,12 +181,12 @@ class ClinicalSettingsPanel(QFrame):
             lambda c: c and self.export_scope_changed.emit("preview")
         )
         self.full_radio.toggled.connect(lambda c: c and self.export_scope_changed.emit("full"))
-        scope_row.addStretch(1)
-        scope_row.addWidget(self.preview_radio)
-        scope_row.addStretch(1)
-        scope_row.addWidget(self.full_radio)
-        scope_row.addStretch(1)
-        self._body_layout.addLayout(scope_row)
+        cap_sel.addStretch(1)
+        cap_sel.addWidget(self.preview_radio)
+        cap_sel.addStretch(1)
+        cap_sel.addWidget(self.full_radio)
+        cap_sel.addStretch(1)
+        root.addLayout(cap_sel)
 
         fmt = QHBoxLayout()
         fmt.addWidget(_label("Image Format"))
@@ -249,16 +200,14 @@ class ClinicalSettingsPanel(QFrame):
             b.setStyleSheet(
                 """
                 QPushButton {
-                    color: rgba(255,255,255,0.74);
                     border: none;
                     background: transparent;
-                    font-size: 14px;
+                    color: rgba(255,255,255,0.76);
+                    font-size: 11px;
                     font-weight: 600;
                     padding: 0 2px;
                 }
-                QPushButton:checked {
-                    color: rgba(255,255,255,0.98);
-                }
+                QPushButton:checked { color: rgba(255,255,255,0.96); }
                 """
             )
         grp_fmt = QButtonGroup(self)
@@ -270,26 +219,26 @@ class ClinicalSettingsPanel(QFrame):
         self._fmt_png.toggled.connect(lambda c: c and self.capture_format_changed.emit("png"))
         fmt.addWidget(self._fmt_jpg)
         fmt.addWidget(self._fmt_png)
-        self._body_layout.addLayout(fmt)
+        root.addLayout(fmt)
 
-        self._body_layout.addLayout(self._value_row("Image Quality", "94%", "quality"))
-        self._body_layout.addLayout(self._value_row("LEDs Preset", "50%", "led"))
+        root.addLayout(self._value_row("Image Quality", "94%", with_auto=False))
+        root.addLayout(self._value_row("LEDs Preset", "50%", with_auto=True))
 
-        mode = QHBoxLayout()
-        self.btn_snapshot = _pill_button("SNAPSHOT")
-        self.btn_burst = _pill_button("BURST")
-        self.btn_snapshot.setChecked(True)
+        modes = QHBoxLayout()
+        self.btn_snapshot = _pill("SNAPSHOT")
+        self.btn_burst = _pill("BURST")
         grp_mode = QButtonGroup(self)
         grp_mode.setExclusive(True)
         grp_mode.addButton(self.btn_snapshot)
         grp_mode.addButton(self.btn_burst)
+        self.btn_snapshot.setChecked(True)
         self.btn_snapshot.toggled.connect(
             lambda c: c and self.capture_mode_changed.emit("snapshot")
         )
         self.btn_burst.toggled.connect(lambda c: c and self.capture_mode_changed.emit("burst"))
-        mode.addWidget(self.btn_snapshot, 1)
-        mode.addWidget(self.btn_burst, 1)
-        self._body_layout.addLayout(mode)
+        modes.addWidget(self.btn_snapshot, 1)
+        modes.addWidget(self.btn_burst, 1)
+        root.addLayout(modes)
 
         delay = QHBoxLayout()
         delay.addWidget(_label("Delay"))
@@ -299,20 +248,20 @@ class ClinicalSettingsPanel(QFrame):
         for sec in (2, 5, 10, 15, 30, 60):
             b = QPushButton(str(sec))
             b.setCheckable(True)
-            b.setFixedSize(32, 32)
+            b.setFixedSize(22, 22)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setStyleSheet(
                 """
                 QPushButton {
-                    border-radius: 16px;
                     border: none;
+                    border-radius: 11px;
                     background: transparent;
-                    color: rgba(255,255,255,0.83);
-                    font-size: 14px;
+                    color: rgba(255,255,255,0.86);
+                    font-size: 10px;
                     font-weight: 600;
                 }
                 QPushButton:checked {
-                    background: rgba(255,255,255,0.34);
+                    background: rgba(255,255,255,0.32);
                     color: #fff;
                 }
                 """
@@ -323,81 +272,86 @@ class ClinicalSettingsPanel(QFrame):
             b.toggled.connect(lambda c, s=sec: c and self.burst_delay_sec_changed.emit(s))
         self._delay_buttons[10].setChecked(True)
         delay.addStretch(1)
-        self._body_layout.addLayout(delay)
+        root.addLayout(delay)
 
-        self._body_layout.addLayout(self._toggle_row("Camera Sound", "sound"))
+        root.addLayout(self._toggle_row("Camera Sound", "sound"))
 
-    def _build_storage_section(self) -> None:
-        self._body_layout.addSpacing(2)
-        self._body_layout.addWidget(_section("Storage"))
-        row = QHBoxLayout()
-        self.btn_system = _pill_button("SYSTEM")
-        self.btn_sd = _pill_button("SD CARD")
+        # storage
+        root.addSpacing(2)
+        root.addWidget(_section("Storage"))
+        st = QHBoxLayout()
+        self.btn_system = _pill("SYSTEM")
+        self.btn_sd = _pill("SD CARD")
+        grp_st = QButtonGroup(self)
+        grp_st.setExclusive(True)
+        grp_st.addButton(self.btn_system)
+        grp_st.addButton(self.btn_sd)
         self.btn_system.setChecked(True)
-        grp = QButtonGroup(self)
-        grp.setExclusive(True)
-        grp.addButton(self.btn_system)
-        grp.addButton(self.btn_sd)
         self.btn_system.toggled.connect(
             lambda c: c and self.storage_target_changed.emit("system")
         )
         self.btn_sd.toggled.connect(self._on_sd_toggled)
-        row.addWidget(self.btn_system, 1)
-        row.addWidget(self.btn_sd, 1)
-        self._body_layout.addLayout(row)
+        st.addWidget(self.btn_system, 1)
+        st.addWidget(self.btn_sd, 1)
+        root.addLayout(st)
 
-    def _build_about_section(self) -> None:
-        self._body_layout.addSpacing(2)
-        self._body_layout.addWidget(_section("About"))
+        root.addSpacing(1)
+        root.addWidget(_section("About"))
         about = QLabel(f"{self._app_name} ALPHA V1.0    ©2026")
-        about.setStyleSheet("color: rgba(255,255,255,0.7); font-size: 12px;")
+        about.setStyleSheet("color: rgba(255,255,255,0.68); font-size: 10px;")
         about.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._body_layout.addWidget(about)
+        root.addWidget(about)
 
-    def _toggle_row(self, label: str, kind: str) -> QHBoxLayout:
+        # hidden functional controls
+        self._quality_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._quality_slider.setRange(60, 100)
+        self._quality_slider.setValue(94)
+        self._quality_slider.valueChanged.connect(self._on_quality_slider)
+        self._led_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._led_slider.setRange(0, 100)
+        self._led_slider.setValue(50)
+        self._led_slider.valueChanged.connect(self._on_led_slider)
+
+    def _toggle_row(self, text: str, kind: str) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(_label(label))
+        row.addWidget(_label(text))
         row.addStretch(1)
-        toggle = _toggle_switch()
-        row.addWidget(toggle, 0, Qt.AlignmentFlag.AlignRight)
+        t = _toggle()
+        row.addWidget(t, 0, Qt.AlignmentFlag.AlignRight)
         if kind == "grid":
-            self.show_grid_toggle = toggle
+            self.show_grid_toggle = t
             self.show_grid_toggle.toggled.connect(self.show_grid_changed.emit)
         elif kind == "crosshair":
-            self.show_crosshair_toggle = toggle
+            self.show_crosshair_toggle = t
             self.show_crosshair_toggle.toggled.connect(self.show_crosshair_changed.emit)
         elif kind == "autoscale":
-            self.auto_scale_toggle = toggle
+            self.auto_scale_toggle = t
             self.auto_scale_toggle.toggled.connect(self.auto_scale_preview_changed.emit)
         else:
-            self.camera_sound_toggle = toggle
+            self.camera_sound_toggle = t
             self.camera_sound_toggle.toggled.connect(self.camera_sound_changed.emit)
         return row
 
-    def _value_row(self, name: str, value: str, kind: str) -> QHBoxLayout:
+    def _value_row(self, name: str, val_text: str, with_auto: bool) -> QHBoxLayout:
         row = QHBoxLayout()
         row.addWidget(_label(name))
         row.addStretch(1)
-        val = _value(value)
+        val = _value(val_text, 600)
         row.addWidget(val)
-        if kind == "quality":
-            self._quality_pct = val
-        elif kind == "led":
+        if with_auto:
+            row.addSpacing(14)
+            row.addWidget(_value("AUTO", 700))
             self._led_pct = val
-            auto = _value("AUTO", bold=True)
-            auto.setStyleSheet("color: rgba(255,255,255,0.92); font-size: 14px; font-weight: 700;")
-            row.addSpacing(18)
-            row.addWidget(auto)
+        else:
+            self._quality_pct = val
         return row
 
     def set_responsive_metrics(self, available_width: int, available_height: int) -> None:
-        """Scale panel size for current viewport, preserving screenshot-like proportions."""
-        w = max(320, min(460, int(available_width * 0.34)))
-        h = max(420, min(760, int(available_height * 0.90)))
-        self.setFixedWidth(w)
-        self.setMaximumHeight(h)
-        self.setMinimumHeight(min(380, h))
+        # Keep the panel compact and screenshot-like.
+        width = max(290, min(360, int(available_width * 0.30)))
+        height = max(470, min(680, int(available_height * 0.92)))
+        self.setFixedWidth(width)
+        self.setFixedHeight(height)
 
     def _on_quality_slider(self, value: int) -> None:
         self._quality_pct.setText(f"{value}%")
