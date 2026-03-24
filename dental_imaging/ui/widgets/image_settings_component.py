@@ -60,7 +60,7 @@ class ImageSettingsComponent(QFrame):
     #: User moved the gain slider (not a programmatic sync).
     gain_slider_user_changed = pyqtSignal()
 
-    DEFAULT_PANEL_WIDTH = 360
+    DEFAULT_PANEL_WIDTH = 340
 
     _ROW_META: Tuple[Tuple[str, str, str], ...] = (
         ("Exposure", "exposure", "Adjust brightness timing. Reset restores automatic exposure on the camera."),
@@ -90,17 +90,54 @@ class ImageSettingsComponent(QFrame):
         self.setStyleSheet(
             """
             QFrame#ImageSettingsComponent {
-                background-color: rgba(248, 248, 250, 242);
-                border-radius: 10px;
-                border: 1px solid rgba(200, 200, 210, 200);
+                background-color: rgba(170, 136, 136, 0.48);
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.20);
             }
             QLabel#imageSettingsHeader {
-                font-weight: 600;
-                font-size: 14px;
+                font-weight: 700;
+                font-size: 16px;
+                color: rgba(255, 255, 255, 0.95);
             }
-            QLabel#imageSettingsHint {
-                color: #555;
-                font-size: 11px;
+            QLabel {
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 12px;
+            }
+            QLabel#sliderPctBubble {
+                background-color: rgba(120, 125, 132, 0.95);
+                border-radius: 12px;
+                color: rgba(255, 255, 255, 0.95);
+                font-size: 9px;
+                font-weight: 600;
+                min-width: 24px;
+                max-width: 24px;
+                min-height: 24px;
+                max-height: 24px;
+                qproperty-alignment: AlignCenter;
+            }
+            QPushButton {
+                color: rgba(255, 255, 255, 0.95);
+                border: none;
+                background: transparent;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: rgba(255,255,255,0.90);
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: rgba(120, 128, 138, 0.95);
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                width: 18px;
+                height: 18px;
+                margin: -6px 0;
+                border-radius: 9px;
+                background: rgba(122,130,140,1.0);
+                border: 1px solid rgba(255,255,255,0.45);
             }
             """
         )
@@ -109,8 +146,8 @@ class ImageSettingsComponent(QFrame):
         self._labels: Dict[str, QLabel] = {}
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 14)
-        root.setSpacing(8)
+        root.setContentsMargins(16, 12, 16, 14)
+        root.setSpacing(10)
 
         header = QHBoxLayout()
         title = QLabel("Image Settings")
@@ -126,21 +163,13 @@ class ImageSettingsComponent(QFrame):
         reset_btn.clicked.connect(self.reset_to_defaults)
         header.addWidget(reset_btn)
 
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton("X")
         close_btn.setFixedWidth(28)
         close_btn.setFlat(True)
         close_btn.setToolTip("Close")
         close_btn.clicked.connect(self._on_close_clicked)
         header.addWidget(close_btn)
         root.addLayout(header)
-
-        hint = QLabel(
-            "Reset matches turning on automatic exposure, gain, and white balance on the camera. "
-            "Moving Exposure or Gain switches that control to manual until you reset."
-        )
-        hint.setObjectName("imageSettingsHint")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
 
         for label_text, key, tip in self._ROW_META:
             self._add_slider_row(root, label_text, key, tip or None)
@@ -155,7 +184,7 @@ class ImageSettingsComponent(QFrame):
         tooltip: Optional[str],
     ) -> None:
         block = QVBoxLayout()
-        block.setSpacing(2)
+        block.setSpacing(4)
         top = QHBoxLayout()
         name = QLabel(title)
         if tooltip:
@@ -163,8 +192,7 @@ class ImageSettingsComponent(QFrame):
         top.addWidget(name)
         top.addStretch()
         pct = QLabel("50%")
-        pct.setMinimumWidth(40)
-        pct.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        pct.setObjectName("sliderPctBubble")
         top.addWidget(pct)
         block.addLayout(top)
 
