@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QSlider,
     QDoubleSpinBox,
+    QLabel,
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
@@ -183,6 +184,9 @@ class MainWindow(QMainWindow):
         self._load_presets()
 
         self._sync_top_chrome()
+
+        self._toast: Optional[QLabel] = None
+        self._toast_timer: Optional[QTimer] = None
 
         self._updating_settings = False
         self.statusBar().showMessage("Ready")
@@ -426,7 +430,66 @@ class MainWindow(QMainWindow):
         self._active_preset_index = index
         self._clinical.bottom_bar().set_active_preset(index)
         self._save_presets()
-        self.statusBar().showMessage(f"Preset {index + 1} saved")
+        self._show_toast(f"Preset {index + 1} stored")
+
+    def _show_toast(self, message: str, duration_ms: int = 2800) -> None:
+        """Brief on-screen confirmation (touch-friendly, above bottom bar)."""
+        cw = self.centralWidget()
+        if cw is None:
+            return
+        if self._toast is None:
+            self._toast = QLabel(cw)
+            self._toast.setObjectName("Toast")
+            self._toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._toast.setStyleSheet(
+                """
+                QLabel#Toast {
+                    background-color: rgba(36, 38, 44, 0.94);
+                    color: #ffffff;
+                    border: 1px solid rgba(255, 255, 255, 0.22);
+                    border-radius: 14px;
+                    padding: 16px 28px;
+                    font-size: 16px;
+                    font-weight: 600;
+                }
+                """
+            )
+            self._toast.setWordWrap(True)
+            self._toast.setMaximumWidth(min(520, max(280, cw.width() - 80)))
+        self._toast.setText(message)
+        self._toast.adjustSize()
+        self._position_toast()
+        self._toast.raise_()
+        self._toast.show()
+        if self._toast_timer is not None:
+            self._toast_timer.stop()
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.timeout.connect(self._hide_toast)
+        self._toast_timer.start(duration_ms)
+
+    def _hide_toast(self) -> None:
+        if self._toast is not None:
+            self._toast.hide()
+
+    def _position_toast(self) -> None:
+        if self._toast is None:
+            return
+        cw = self.centralWidget()
+        if cw is None:
+            return
+        self._toast.setMaximumWidth(min(520, max(280, cw.width() - 80)))
+        self._toast.adjustSize()
+        margin_x = 24
+        margin_bottom = 132
+        x = (cw.width() - self._toast.width()) // 2
+        y = cw.height() - self._toast.height() - margin_bottom
+        self._toast.move(max(margin_x, x), max(24, y))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._toast is not None and self._toast.isVisible():
+            self._position_toast()
 
     def _refresh_preview_if_idle(self) -> None:
         pass
