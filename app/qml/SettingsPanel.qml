@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Window
 import "components"
 
 // Settings modal — layout matches reference (Display / Capture / Storage / About).
@@ -8,7 +9,10 @@ Rectangle {
     id: panel
 
     visible: bridge.settingsPanelVisible
-    width:   400
+    width: {
+        const w = Window.window ? Window.window.width : 1280
+        return Math.min(400, Math.max(280, w - 40))
+    }
     z:       100
 
     // When not set from outside, allow full growth (e.g. tests)

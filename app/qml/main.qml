@@ -2,18 +2,35 @@ import QtQuick
 import QtQuick.Controls
 
 // ── Application window ────────────────────────────────────────────────────────
-// Full-bleed camera image fills the background.
-// Top / right / bottom chrome are floating “pill” panels (Occuscope-style margins).
-// Image-settings / settings modals float above everything.
+// Full-bleed camera image; floating chrome scales with window size / avoids overlap.
 ApplicationWindow {
     id: win
-    title:        "Dental Imaging System"
-    width:        1900
-    height:       1080
-    minimumWidth: 1280
-    minimumHeight: 960
-    visible:      true
-    color:        "#0d0f14"
+    title:         "Dental Imaging System"
+    width:         1280
+    height:        720
+    minimumWidth:  720
+    minimumHeight: 480
+    visible:       true
+    color:         "#0d0f14"
+
+    // ── Responsive chrome (margins + rail width + compact breakpoints) ───
+    readonly property bool uiCompact: width < 1180
+    readonly property bool uiNarrow:  width < 920
+    readonly property bool uiShort:   height < 700
+    readonly property real marginH:   Math.max(10, Math.min(18, width * 0.016))
+    readonly property real marginV:   Math.max(8, Math.min(14, height * 0.014))
+    readonly property real railW:     uiNarrow ? 66 : 76
+
+    readonly property real bottomBarTargetW: {
+        const frac = uiNarrow ? 0.90 : 0.68
+        const cap = Math.min(920, Math.floor(width * frac))
+        const gap = 16
+        // Keep bar from overlapping the right rail when centered
+        const overlapMax = rightRail.x > gap
+            ? Math.floor(2 * rightRail.x - width - 2 * gap)
+            : Math.floor(width - railW - marginH * 2 - 32)
+        return Math.max(240, Math.min(cap, overlapMax))
+    }
 
     // ── Camera / placeholder image ─────────────────────────────────────────
     Image {
@@ -25,7 +42,6 @@ ApplicationWindow {
         smooth:       true
         asynchronous: false
 
-        // Dark backdrop while waiting for the first frame
         Rectangle {
             anchors.fill: parent
             color:        "#0d0f14"
@@ -34,72 +50,73 @@ ApplicationWindow {
                 anchors.centerIn: parent
                 text:  "Waiting for camera…"
                 color: "#404055"
-                font.pixelSize: 18
+                font.pixelSize: win.uiCompact ? 15 : 18
             }
         }
     }
 
-    // ── Top bar (full width, inset from edges) ─────────────────────────────
+    // ── Top bar ───────────────────────────────────────────────────────────
     TopBar {
         id: topBar
+        z: 20
         anchors {
             top: parent.top
             left: parent.left
             right: parent.right
-            topMargin: 12
-            leftMargin: 14
-            rightMargin: 14
+            topMargin: marginV + (uiShort ? 2 : 4)
+            leftMargin: marginH
+            rightMargin: marginH
         }
-        height: 56
+        height: uiCompact ? 50 : 56
     }
 
-    // ── Bottom bar — centered capsule ~⅔ width ───────────────────────────
+    // ── Bottom bar (width capped vs. right rail) ────────────────────────────
     BottomBar {
         id: bottomBar
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 18
-        width: Math.min(920, Math.floor(parent.width * 0.68))
-        height: 78
+        anchors.bottomMargin: Math.max(12, marginV + (uiShort ? 4 : 10))
+        width: win.bottomBarTargetW
+        height: uiCompact ? 70 : 78
     }
 
-    // ── Right rail — vertical capsule between top and bottom bars ─────────
+    // ── Right rail ──────────────────────────────────────────────────────────
     RightRail {
         id: rightRail
+        z: 10
         anchors {
             top: topBar.bottom
             right: parent.right
             bottom: bottomBar.top
-            topMargin: 12
-            rightMargin: 16
-            bottomMargin: 14
+            // Clear gap under top bar so rail capsules never meet the header edge
+            topMargin: Math.max(16, marginV + (uiShort ? 10 : 14))
+            rightMargin: marginH + 4
+            bottomMargin: uiShort ? 10 : 14
         }
-        width: 76
+        width: win.railW
     }
 
-    // ── Image settings panel (floating, draggable) ─────────────────────────
+    // ── Floating panels (stay inside window next to rail) ───────────────────
     ImageSettingsPanel {
         id: imgPanel
-        x: Math.max(8, rightRail.x - width - 12)
-        y: topBar.y + topBar.height + 12
+        x: Math.max(8, Math.min(rightRail.x - width - 10, win.width - width - marginH))
+        y: topBar.y + topBar.height + 10
     }
 
-    // Same floating / draggable positioning as ImageSettingsPanel (anchors would block drag)
     SettingsPanel {
         id: settingsPanel
-        x: Math.max(8, rightRail.x - width - 12)
-        y: topBar.y + topBar.height + 12
-        maxPanelHeight: win.height - topBar.y - topBar.height - 12 - bottomBar.height - 36
+        x: Math.max(8, Math.min(rightRail.x - width - 10, win.width - width - marginH))
+        y: topBar.y + topBar.height + 10
+        maxPanelHeight: win.height - topBar.y - topBar.height - 12 - bottomBar.height - 32
     }
 
-    // ── Toast notification ─────────────────────────────────────────────────
     Toast {
         id: toast
         z: 200
         anchors {
             horizontalCenter: parent.horizontalCenter
             bottom:           parent.bottom
-            bottomMargin:     bottomBar.height + 32
+            bottomMargin:     bottomBar.height + Math.max(24, marginV + 14)
         }
     }
 
@@ -108,7 +125,6 @@ ApplicationWindow {
         function onToastRequested(message) { toast.show(message) }
     }
 
-    // ── Keyboard shortcuts ─────────────────────────────────────────────────
     Item {
         anchors.fill: parent
         focus: true

@@ -1,22 +1,32 @@
 import QtQuick
+import QtQuick.Window
 import "components"
 
 // Two stacked glass capsules (Occuscope ref): top = transform + settings; bottom = capture + tools.
 Item {
     id: root
     implicitWidth: 76
+    clip: true
+
+    readonly property var uw: Window.window
+    readonly property real _ah: uw ? uw.height : 800
+    readonly property bool _short: _ah < 720
+    readonly property bool _compact: _ah < 620
 
     readonly property color _glass: Qt.rgba(0.06, 0.07, 0.11, 0.44)
     readonly property color _border: Qt.rgba(1, 1, 1, 0.26)
-    // Inset icons from capsule ends and sides (ref: breathing room inside pill)
-    readonly property real _padV: 16
-    readonly property real _padH: 10
+    readonly property real _padV: _compact ? 10 : (_short ? 12 : 16)
+    readonly property real _padH: _compact ? 6 : (_short ? 8 : 10)
 
+    // verticalCenter alone lets the column extend above parent.top when content is taller
+    // than the slot — Item does not clip by default, so it drew over the top bar.
     Column {
+        id: railColumn
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 12
+        spacing: _compact ? 8 : (_short ? 10 : 12)
         width: root.width
+        readonly property real _slotH: parent.height
+        y: height <= _slotH ? Math.max(0, (_slotH - height) * 0.5) : 0
 
         // ── Top capsule: flip, rotate, image settings, app settings ───────
         Rectangle {
@@ -32,7 +42,7 @@ Item {
                 id: topCol
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: root._padV
-                spacing: 6
+                spacing: root._compact ? 3 : (root._short ? 4 : 6)
                 width: root.width - 2 * root._padH
 
                 RailButton {
@@ -90,7 +100,7 @@ Item {
                 id: botCol
                 anchors.horizontalCenter: parent.horizontalCenter
                 y: root._padV
-                spacing: 6
+                spacing: root._compact ? 3 : (root._short ? 4 : 6)
                 width: root.width - 2 * root._padH
 
                 RailButton {

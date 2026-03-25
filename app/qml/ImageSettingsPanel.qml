@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
+import QtQuick.Window
 import "components"
 
 // Floating Image Settings — frosted panel; labels above sliders; inverted track (ref UI).
@@ -8,7 +9,10 @@ Rectangle {
     id: panel
 
     visible:      bridge.imageSettingsVisible
-    width:        336
+    width: {
+        const w = Window.window ? Window.window.width : 1280
+        return Math.min(336, Math.max(260, w - 40))
+    }
     height:       hdr.height + 10 + sep.height + 14 + rows.implicitHeight + 36
     radius:       16
     // Glass-style: more transparent so the camera preview reads through (ref)

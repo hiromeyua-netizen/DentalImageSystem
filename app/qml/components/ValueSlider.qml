@@ -11,10 +11,13 @@ Item {
 
     signal userChanged(int v)
 
+    // Slightly smaller thumb on compact layouts (BottomBar passes this).
+    property real thumbRadius: 18
+
     implicitWidth:  200
     implicitHeight: _r * 2 + 8
 
-    readonly property real _r: 18          // thumb radius
+    readonly property real _r: thumbRadius
     readonly property real _m: _r          // track left/right inset
 
     // Track
@@ -51,7 +54,8 @@ Item {
         Text {
             anchors.centerIn: parent
             text: root.value + "%"
-            font.pixelSize: 10; font.bold: true
+            font.pixelSize: root._r < 17 ? 9 : 10
+            font.bold: true
             color: "#16161e"
         }
     }
