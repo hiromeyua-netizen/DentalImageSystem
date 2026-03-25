@@ -14,38 +14,38 @@ Rectangle {
     }
 
     RowLayout {
+        id: barLayout
         anchors { fill: parent; leftMargin: 18; rightMargin: 18 }
         spacing: 20
+
+        // App name / sub-name exposed as context properties from Python
+        readonly property string _name:    (typeof appName    !== "undefined") ? appName    : "DENTAL IMAGING"
+        readonly property string _subName: (typeof appSubName !== "undefined") ? appSubName : "SYSTEM"
 
         // ── Logo ──────────────────────────────────────────────────────────
         Column {
             spacing: 2
             Layout.alignment: Qt.AlignVCenter
+
             Text {
-                text:           bridge.statsText.length > 0 ? appName.split("\n")[0] : appName
-                font.pixelSize: 14
-                font.bold:      true
+                text:               barLayout._name
+                font.pixelSize:     14
+                font.bold:          true
                 font.letterSpacing: 0.8
-                color:          "#ffffff"
-                property string appName: bridge.statsText.length >= 0 ? _appName : _appName
+                color:              "#ffffff"
             }
             Text {
-                text:           _appSubName
-                font.pixelSize: 9
+                text:               barLayout._subName
+                font.pixelSize:     9
                 font.letterSpacing: 0.5
-                color:          "#9090a0"
+                color:              "#9090a0"
             }
         }
 
-        // invisible: expose brand via context properties set from Python
-        property string _appName:    typeof appName    !== "undefined" ? appName    : "DENTAL IMAGING"
-        property string _appSubName: typeof appSubName !== "undefined" ? appSubName : "SYSTEM"
-
         Item { Layout.fillWidth: true }
 
-        // ── Stream stats ──────────────────────────────────────────────────
+        // ── Stream stats (plain text, no pill) ────────────────────────────
         Text {
-            id: statsLabel
             text:               bridge.statsText
             font.pixelSize:     13
             font.weight:        Font.Medium
@@ -56,96 +56,60 @@ Rectangle {
 
         // ── CONNECTED pill ────────────────────────────────────────────────
         Rectangle {
-            id: connPill
-            width:  pillText.implicitWidth + 28
+            width:  connText.implicitWidth + 28
             height: 32
             radius: 16
-            color: bridge.connected
-                ? Qt.rgba(1, 1, 1, 0.18)
-                : Qt.rgba(1, 1, 1, 0.10)
+            color:  bridge.connected ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(1, 1, 1, 0.10)
             border.width: 1
-            border.color: bridge.connected
-                ? Qt.rgba(1, 1, 1, 0.55)
-                : Qt.rgba(1, 1, 1, 0.25)
+            border.color: bridge.connected ? Qt.rgba(1, 1, 1, 0.55) : Qt.rgba(1, 1, 1, 0.25)
             Layout.alignment: Qt.AlignVCenter
 
             Behavior on color        { ColorAnimation { duration: 250 } }
             Behavior on border.color { ColorAnimation { duration: 250 } }
 
             Text {
-                id:              pillText
+                id:               connText
                 anchors.centerIn: parent
-                text:            bridge.connected ? "CONNECTED" : "DISCONNECTED"
-                font.pixelSize:  11
-                font.bold:       true
+                text:             bridge.connected ? "CONNECTED" : "DISCONNECTED"
+                font.pixelSize:   11
+                font.bold:        true
                 font.letterSpacing: 0.6
-                color:           bridge.connected ? "#ffffff" : "#c0c0c8"
+                color:            bridge.connected ? "#ffffff" : "#c0c0c8"
                 Behavior on color { ColorAnimation { duration: 250 } }
             }
         }
 
-        // ── Power button ──────────────────────────────────────────────────
+        // ── Power button (round white circle + dark icon) ─────────────────
         Rectangle {
-            id:     powerBtn
+            id:     powerCircle
             width:  44
             height: 44
             radius: 22
-            color:  powerMa.pressed ? "#d8d8e0"
-                  : powerMa.containsMouse ? "#ffffff" : Qt.rgba(1,1,1,0.92)
+            color:  powerArea.pressed       ? "#d4d4dc"
+                  : powerArea.containsMouse ? "#ffffff"
+                  :                           Qt.rgba(1, 1, 1, 0.92)
             Layout.alignment: Qt.AlignVCenter
 
             Behavior on color { ColorAnimation { duration: 100 } }
 
+            // Power SVG — Qt renders currentColor as black on a light background
             Image {
                 anchors.centerIn: parent
                 source:           Qt.resolvedUrl("icons/power.svg")
                 sourceSize:       Qt.size(22, 22)
                 fillMode:         Image.PreserveAspectFit
-                // SVG stroke colour via colour overlay
-                layer.enabled: true
-                layer.effect: null
-            }
-
-            // Colourize the white SVG to dark for the light button
-            ColorOverlayShim {
-                anchors.fill: parent
-                svgSource:    Qt.resolvedUrl("icons/power.svg")
-                tintColor:    "#18181c"
             }
 
             MouseArea {
-                id:              powerMa
-                anchors.fill:    parent
-                hoverEnabled:    true
-                cursorShape:     Qt.PointingHandCursor
-                onClicked:       bridge.onPowerClicked()
+                id:           powerArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape:  Qt.PointingHandCursor
+                onClicked:    bridge.onPowerClicked()
             }
 
-            scale: powerMa.pressed ? 0.90 : 1.0
+            scale: powerArea.pressed ? 0.90 : 1.0
             Behavior on scale { NumberAnimation { duration: 80 } }
         }
-    }
-}
-
-// Inline helper to render SVG with a solid tint (avoids needing MultiEffect)
-component ColorOverlayShim: Item {
-    property url   svgSource
-    property color tintColor: "white"
-
-    Image {
-        anchors.fill: parent
-        source:       svgSource
-        sourceSize:   Qt.size(parent.width, parent.height)
-        fillMode:     Image.PreserveAspectFit
-        visible:      false
-        id:           _src
-    }
-    // Simple rectangle mask: only works cleanly on solid/semi transparent bgs
-    // For the white power circle this is fine.
-    Image {
-        anchors.fill:  parent
-        source:        svgSource
-        sourceSize:    Qt.size(parent.width, parent.height)
-        fillMode:      Image.PreserveAspectFit
     }
 }

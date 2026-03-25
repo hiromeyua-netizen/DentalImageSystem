@@ -10,7 +10,9 @@ Item {
     property int  minimum: 0
     property int  maximum: 100
 
-    signal valueChanged(int v)
+    // userChanged carries the new value explicitly — avoids clash with the
+    // auto-generated "valueChanged()" signal that Qt creates for every property.
+    signal userChanged(int v)
 
     implicitHeight: thumbR * 2 + 8
     implicitWidth:  200
@@ -81,7 +83,7 @@ Item {
         var v = Math.round(minimum + frac * (maximum - minimum))
         if (v !== value) {
             value = v
-            root.valueChanged(v)
+            root.userChanged(v)
         }
     }
 }

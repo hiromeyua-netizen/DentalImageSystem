@@ -64,6 +64,9 @@ class _ImageSettingsButtonProxy(QObject):
     def isChecked(self) -> bool:
         return self._b.imgSettingsCheckedState
 
+    def isCheckable(self) -> bool:
+        return True
+
 
 class _RailProxy(QObject):
     """Proxy for RightToolRail — forwards bridge signals outward."""
