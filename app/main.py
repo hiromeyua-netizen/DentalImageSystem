@@ -37,6 +37,7 @@ def main():
         return 1
 
     camera_service.refresh_detection()
+    camera_service.auto_connect_if_available()
     return app.exec()
 
 

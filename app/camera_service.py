@@ -31,6 +31,9 @@ except Exception:  # pragma: no cover - optional env without pypylon
     CameraConfig = None  # type: ignore[assignment,misc]
     _HAS_BASLER = False
 
+# Nominal stream rate (UI + timer; matches product reference / camera config).
+TARGET_FPS = 31
+
 
 class CameraService(QObject):
     """Drives ``FrameProvider`` + ``DentalBridge`` from a Basler camera when available."""
@@ -42,10 +45,9 @@ class CameraService(QObject):
         self._camera: Any = None
         self._detected: List[Any] = []
         self._timer = QTimer(self)
-        self._timer.setInterval(33)
+        self._timer.setInterval(max(16, int(round(1000 / TARGET_FPS))))
         self._timer.timeout.connect(self._on_frame_tick)
-        self._frame_accum = 0
-        self._fps_t0 = time.perf_counter()
+        self._stats_t0 = time.perf_counter()
 
     # ── Detection ───────────────────────────────────────────────────────────
     def refresh_detection(self) -> None:
@@ -73,6 +75,15 @@ class CameraService(QObject):
     @pyqtSlot()
     def refresh_camera_detection(self) -> None:
         self.refresh_detection()
+
+    @pyqtSlot()
+    def auto_connect_if_available(self) -> None:
+        """Connect on startup when at least one Basler camera is present."""
+        if self._bridge.connected:
+            return
+        if not _HAS_BASLER or not self._detected:
+            return
+        self._connect()
 
     # ── Connect / disconnect (power button) ─────────────────────────────────
     @pyqtSlot()
@@ -126,8 +137,7 @@ class CameraService(QObject):
         self._camera = cam
         self._bridge.set_connected(True)
         self._bridge.set_capturable(True)
-        self._frame_accum = 0
-        self._fps_t0 = time.perf_counter()
+        self._stats_t0 = time.perf_counter()
         self._timer.start()
         self._bridge.toast("Camera connected")
 
@@ -157,14 +167,11 @@ class CameraService(QObject):
             return
         self._provider.update_frame(frame)
         self._bridge.push_frame(self._provider)
-        self._frame_accum += 1
         now = time.perf_counter()
-        dt = now - self._fps_t0
-        if dt < 0.45:
+        if now - self._stats_t0 < 0.45:
             return
-        fps = self._frame_accum / dt
-        self._frame_accum = 0
-        self._fps_t0 = now
+        self._stats_t0 = now
         h, w = frame.shape[:2]
+        fps = float(TARGET_FPS)
         mbps = (w * h * 3.0 * fps) / (1024.0 * 1024.0)
         self._bridge.set_stats(w, h, fps, mbps)
