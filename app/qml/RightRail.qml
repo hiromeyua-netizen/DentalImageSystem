@@ -18,15 +18,32 @@ Item {
     readonly property real _padV: _compact ? 10 : (_short ? 12 : 16)
     readonly property real _padH: _compact ? 6 : (_short ? 8 : 10)
 
-    // verticalCenter alone lets the column extend above parent.top when content is taller
-    // than the slot — Item does not clip by default, so it drew over the top bar.
+    // Natural column height (layout size; unaffected by visual scale).
+    readonly property real _contentH: railColumn.height
+    readonly property real _slotH: Math.max(1, root.height - 4)
+    // Shrink uniformly when the slot is shorter than the stacked capsules (no clipping).
+    readonly property real fitScale: {
+        const need = _contentH
+        if (need < 2)
+            return 1
+        if (need <= _slotH)
+            return 1
+        return Math.min(1, (_slotH - 1) / need)
+    }
+    readonly property real _scaledH: _contentH * fitScale
+    readonly property real _yCentered: Math.max(2, (root.height - _scaledH) * 0.5)
+    readonly property real _yUnscaled: _contentH <= root.height
+        ? Math.max(0, (root.height - _contentH) * 0.5)
+        : 0
+
     Column {
         id: railColumn
         anchors.horizontalCenter: parent.horizontalCenter
+        transformOrigin: Item.Top
+        scale: root.fitScale
         spacing: _compact ? 8 : (_short ? 10 : 12)
         width: root.width
-        readonly property real _slotH: parent.height
-        y: height <= _slotH ? Math.max(0, (_slotH - height) * 0.5) : 0
+        y: root.fitScale < 1 ? root._yCentered : root._yUnscaled
 
         // ── Top capsule: flip, rotate, image settings, app settings ───────
         Rectangle {
