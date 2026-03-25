@@ -15,7 +15,7 @@ from typing import Any, List, Optional
 import numpy as np
 from PyQt6.QtCore import QObject, QTimer, pyqtSlot
 
-from view_transforms import apply_view_transforms
+from view_transforms import apply_view_transforms, zoom_crop
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -167,8 +167,11 @@ class CameraService(QObject):
             frame = None
         if frame is None or frame.size == 0:
             return
+        out = zoom_crop(frame, self._bridge.zoom)
+        if out is None or out.size == 0:
+            return
         out = apply_view_transforms(
-            frame,
+            out,
             flip_h=self._bridge.flipHorizontal,
             flip_v=self._bridge.flipVertical,
             rotate_q=self._bridge.rotateQuarterTurns,
