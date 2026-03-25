@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 // ── Application window ────────────────────────────────────────────────────────
 // Full-bleed camera image; floating chrome scales with window size / avoids overlap.
@@ -281,7 +282,7 @@ ApplicationWindow {
                 wrapMode: Text.WrapAnywhere
             }
 
-            Row {
+            RowLayout {
                 spacing: 10
 
                 Button {
