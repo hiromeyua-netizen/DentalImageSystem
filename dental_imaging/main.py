@@ -6,8 +6,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
+
+# Must be set before any Qt/QML module is imported so the QML engine picks up
+# the Basic (non-native) style, which allows Slider background/handle overrides.
+os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 
 from PyQt6.QtWidgets import QApplication
 

@@ -31,9 +31,9 @@ class CameraFrameProvider(QQuickImageProvider):
         with self._lock:
             self._image = qi.copy()            # copy so the numpy buffer is safe to release
 
-    def requestImage(
-        self, _id: str, _size: QSize, _requested: QSize
-    ) -> tuple[QImage, QSize]:
+    def requestImage(self, _id: str, _size: QSize) -> tuple[QImage, QSize]:
+        # PyQt6: the C++ QSize* output is represented by the second element of
+        # the returned tuple; requestedSize is not forwarded to Python.
         with self._lock:
             img = self._image.copy()
         return img, img.size()
