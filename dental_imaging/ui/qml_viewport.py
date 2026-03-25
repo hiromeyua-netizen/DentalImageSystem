@@ -68,23 +68,44 @@ class _ImageSettingsButtonProxy(QObject):
         return True
 
 
+class _SimpleCheckProxy(QObject):
+    """Minimal button proxy that delegates setChecked() to a bridge setter."""
+
+    def __init__(
+        self, setter_fn, parent: Optional[QObject] = None
+    ) -> None:
+        super().__init__(parent)
+        self._setter = setter_fn
+
+    def setChecked(self, v: bool) -> None:
+        self._setter(bool(v))
+
+    def isChecked(self) -> bool:
+        return False
+
+    def isCheckable(self) -> bool:
+        return True
+
+
 class _RailProxy(QObject):
     """Proxy for RightToolRail — forwards bridge signals outward."""
-    capture_clicked        = pyqtSignal()
-    settings_toggled       = pyqtSignal(bool)
+    capture_clicked         = pyqtSignal()
+    settings_toggled        = pyqtSignal(bool)
     flip_horizontal_clicked = pyqtSignal()
-    flip_vertical_clicked  = pyqtSignal()
-    rotate_ccw_clicked     = pyqtSignal()
-    rotate_cw_clicked      = pyqtSignal()
-    auto_color_toggled     = pyqtSignal(bool)
-    recenter_roi_clicked   = pyqtSignal()
-    roi_mode_toggled       = pyqtSignal(bool)
-    image_settings_clicked = pyqtSignal(bool)
+    flip_vertical_clicked   = pyqtSignal()
+    rotate_ccw_clicked      = pyqtSignal()
+    rotate_cw_clicked       = pyqtSignal()
+    auto_color_toggled      = pyqtSignal(bool)
+    recenter_roi_clicked    = pyqtSignal()
+    roi_mode_toggled        = pyqtSignal(bool)
+    image_settings_clicked  = pyqtSignal(bool)
 
     def __init__(self, bridge: DentalBridge, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self._b = bridge
+        self._b       = bridge
         self._img_btn = _ImageSettingsButtonProxy(bridge, parent=self)
+        self._roi_btn = _SimpleCheckProxy(bridge.set_roi_mode,   parent=self)
+        self._ac_btn  = _SimpleCheckProxy(bridge.set_auto_color, parent=self)
 
         bridge.captureClicked.connect(self.capture_clicked)
         bridge.settingsPanelToggled.connect(self.settings_toggled)
@@ -101,13 +122,13 @@ class _RailProxy(QObject):
         return self._img_btn
 
     def settings_tool_button(self) -> _ImageSettingsButtonProxy:
-        return self._img_btn      # not used directly in MainWindow
+        return self._img_btn
 
-    def auto_color_button(self) -> None:
-        return None               # MainWindow only uses .setChecked
+    def roi_mode_button(self) -> _SimpleCheckProxy:
+        return self._roi_btn
 
-    def roi_mode_button(self) -> None:
-        return None
+    def auto_color_button(self) -> _SimpleCheckProxy:
+        return self._ac_btn
 
     def set_capture_enabled(self, enabled: bool) -> None:
         self._b.set_capturable(enabled)

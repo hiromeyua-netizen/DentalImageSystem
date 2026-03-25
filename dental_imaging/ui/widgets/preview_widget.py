@@ -6,7 +6,7 @@ from typing import Optional
 import numpy as np
 from PyQt6.QtWidgets import QLabel, QWidget
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 import cv2
 
 
@@ -52,6 +52,10 @@ class PreviewWidget(QLabel):
         self._drag_anchor: Optional[tuple[int, int]] = None
         self._last_drag_point: Optional[tuple[int, int]] = None
 
+        # Overlay mode: widget is transparent; only the ROI box is painted.
+        # Used when the QML viewport already renders the camera feed.
+        self._overlay_mode = False
+
     def set_show_grid(self, on: bool) -> None:
         self._show_grid = bool(on)
 
@@ -60,6 +64,19 @@ class PreviewWidget(QLabel):
 
     def set_auto_scale_preview(self, on: bool) -> None:
         self._auto_scale_preview = bool(on)
+
+    def set_overlay_mode(self, on: bool) -> None:
+        """
+        Enable overlay mode: the widget becomes transparent and only draws
+        the ROI box.  Use when a QML viewport is already rendering the camera.
+        """
+        self._overlay_mode = bool(on)
+        if self._overlay_mode:
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            self.setStyleSheet("background: transparent;")
+        else:
+            self.setStyleSheet("background-color: black;")
+        self._redraw_current()
 
     def set_roi_mode(self, enabled: bool) -> None:
         """Enable or disable interactive ROI edit mode."""
@@ -101,19 +118,85 @@ class PreviewWidget(QLabel):
     def display_frame(self, frame: Optional[np.ndarray]) -> None:
         """
         Display a camera frame.
-        
+
+        In overlay mode the widget is transparent and only paints the ROI
+        box using QPainter.  The camera pixels are not rendered here (the
+        QML Image element handles that).
+
         Args:
             frame: numpy array (BGR format) or None to clear display
         """
         if frame is None:
-            self.setText("No frame available")
+            if not self._overlay_mode:
+                self.setText("No frame available")
             self.current_frame = None
             return
-        
+
         self.current_frame = frame
         height, width = frame.shape[:2]
         self._aspect_ratio = width / height
-        
+
+        # ── Overlay mode: transparent widget, ROI drawn via QPainter ─────────
+        if self._overlay_mode:
+            cw = max(1, self.width())
+            ch = max(1, self.height())
+
+            # Compute aspect-fit geometry (matches QML Image.PreserveAspectFit)
+            scale = min(cw / max(1, width), ch / max(1, height))
+            dw_px = max(1, int(width  * scale))
+            dh_px = max(1, int(height * scale))
+            ox    = (cw - dw_px) // 2
+            oy    = (ch - dh_px) // 2
+            self._display_origin = QPoint(ox, oy)
+            self._display_size   = (dw_px, dh_px)
+
+            if self.isVisible() and self._roi_rect is not None and self._roi_edit_mode:
+                img_argb = QImage(cw, ch, QImage.Format.Format_ARGB32_Premultiplied)
+                img_argb.fill(0)  # fully transparent
+
+                painter = QPainter(img_argb)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+                x, y, rw, rh = self._clamp_rect(self._roi_rect)
+                self._roi_rect = (x, y, rw, rh)
+                wx1, wy1 = self._frame_to_widget(x, y)
+                wx2, wy2 = self._frame_to_widget(x + rw, y + rh)
+                ww = wx2 - wx1
+                wh = wy2 - wy1
+
+                # Dim the camera area outside the ROI
+                painter.fillRect(ox, oy, dw_px, dh_px, QColor(10, 10, 14, 46))
+                # Punch out the ROI region (make it fully transparent again)
+                painter.setCompositionMode(
+                    QPainter.CompositionMode.CompositionMode_Clear
+                )
+                painter.fillRect(wx1, wy1, ww, wh, QColor(0, 0, 0, 0))
+                painter.setCompositionMode(
+                    QPainter.CompositionMode.CompositionMode_SourceOver
+                )
+
+                # ROI border
+                painter.setPen(QPen(QColor(255, 255, 255), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(wx1, wy1, ww, wh)
+
+                # Corner drag handles
+                hs = max(4, min(10, min(ww, wh) // 12))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(255, 255, 255))
+                for cx, cy in ((wx1, wy1), (wx2, wy1), (wx1, wy2), (wx2, wy2)):
+                    painter.fillRect(cx - hs, cy - hs, hs * 2, hs * 2,
+                                     QColor(255, 255, 255))
+                painter.end()
+
+                self.setPixmap(QPixmap.fromImage(img_argb))
+            else:
+                self.setPixmap(QPixmap())   # nothing to show
+
+            self.frame_displayed.emit()
+            return
+
+        # ── Normal (non-overlay) mode ─────────────────────────────────────────
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         rgb_frame = np.ascontiguousarray(rgb_frame)
 
@@ -271,6 +354,17 @@ class PreviewWidget(QLabel):
             hs = max(4, min(10, min(fw, fh) // 120))
             for cx, cy in ((x, y), (x + w, y), (x, y + h), (x + w, y + h)):
                 cv2.rectangle(rgb_frame, (cx - hs, cy - hs), (cx + hs, cy + hs), color, -1)
+
+    def _frame_to_widget(self, fx: int, fy: int) -> tuple[int, int]:
+        """Convert frame pixel coordinates to widget pixel coordinates."""
+        if self.current_frame is None or self.current_frame.size == 0:
+            return (0, 0)
+        fh, fw = self.current_frame.shape[:2]
+        ox, oy = self._display_origin.x(), self._display_origin.y()
+        dw, dh = self._display_size
+        wx = ox + round(fx / max(1, fw - 1) * max(1, dw - 1))
+        wy = oy + round(fy / max(1, fh - 1) * max(1, dh - 1))
+        return (int(wx), int(wy))
 
     def _widget_to_frame(self, p: QPoint) -> Optional[tuple[int, int]]:
         if self.current_frame is None or self.current_frame.size == 0:

@@ -156,6 +156,15 @@ class MainWindow(QMainWindow):
         )
         self.setCentralWidget(self._clinical)
 
+        # ── ROI overlay: preview_widget parented to QML viewport ───────────
+        # The widget is transparent; it only paints the ROI box on top of the
+        # QML camera feed when ROI mode is active.
+        self.preview_widget.set_overlay_mode(True)
+        self.preview_widget.setParent(self._clinical)
+        self.preview_widget.setVisible(False)
+        self.preview_widget.raise_()
+        self._update_roi_overlay_geometry()
+
         # Wire bridge image-settings slider signals → existing handlers
         _br = self._clinical.bridge()
         _br.exposureUserChanged.connect(self._on_exposure_slider_manual)
@@ -399,6 +408,27 @@ class MainWindow(QMainWindow):
                 f"B:{self._auto_color_gains[0]:.2f} G:{self._auto_color_gains[1]:.2f} R:{self._auto_color_gains[2]:.2f}"
             )
 
+    # Chrome geometry (must match QML values in main.qml / TopBar / RightRail / BottomBar)
+    _TOP_CHROME_H  = 62
+    _RAIL_CHROME_W = 92
+    _BOT_CHROME_H  = 100
+
+    def _update_roi_overlay_geometry(self) -> None:
+        """Size and position the ROI overlay widget over the camera area."""
+        if not hasattr(self, "_clinical") or not hasattr(self, "preview_widget"):
+            return
+        cw = max(1, self._clinical.width())
+        ch = max(1, self._clinical.height())
+        overlay_x = 0
+        overlay_y = self._TOP_CHROME_H
+        overlay_w = max(1, cw - self._RAIL_CHROME_W)
+        overlay_h = max(1, ch - self._TOP_CHROME_H - self._BOT_CHROME_H)
+        self.preview_widget.setGeometry(overlay_x, overlay_y, overlay_w, overlay_h)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_roi_overlay_geometry()
+
     def _stub_recenter_roi(self) -> None:
         if not self._roi_mode_active:
             self.statusBar().showMessage("Enable ROI mode first")
@@ -409,8 +439,12 @@ class MainWindow(QMainWindow):
     def _stub_roi_mode(self, enabled: bool) -> None:
         self._roi_mode_active = bool(enabled)
         self.preview_widget.set_roi_mode(self._roi_mode_active)
+        # Show/hide the transparent overlay widget
+        self.preview_widget.setVisible(self._roi_mode_active)
+        if self._roi_mode_active:
+            self.preview_widget.raise_()
         self.statusBar().showMessage(
-            "ROI mode enabled - drag to draw/edit box"
+            "ROI mode enabled – drag to draw/resize box"
             if self._roi_mode_active
             else "ROI mode disabled"
         )
@@ -562,7 +596,9 @@ class MainWindow(QMainWindow):
             self.preview_widget.set_roi_rect(None)
 
         roi_enabled = bool(preset.get("roi_mode", False))
-        self._clinical.right_rail().roi_mode_button().setChecked(roi_enabled)
+        # Update Python state + QML UI + overlay visibility
+        self._stub_roi_mode(roi_enabled)
+        self._clinical.bridge().set_roi_mode(roi_enabled)
 
         gains = preset.get("auto_color_gains", [1.0, 1.0, 1.0])
         if isinstance(gains, list) and len(gains) == 3:
@@ -572,7 +608,9 @@ class MainWindow(QMainWindow):
         else:
             self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
         ac_enabled = bool(preset.get("auto_color_enabled", False))
-        self._clinical.right_rail().auto_color_button().setChecked(ac_enabled)
+        # Update Python state + QML UI directly (avoid re-computing gains)
+        self._auto_color_balance_enabled = ac_enabled
+        self._clinical.bridge().set_auto_color(ac_enabled)
 
         self._redraw_preview_if_possible()
 
