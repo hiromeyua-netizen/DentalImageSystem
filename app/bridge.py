@@ -57,7 +57,7 @@ class DentalBridge(QObject):
         self._stats_text         = "— × —   — fps   — MB/s"
         self._frame_counter      = 0
         self._brightness         = 26
-        self._zoom               = 26
+        self._zoom               = 0
         self._active_preset      = -1
         self._img_settings_vis   = False
         self._settings_panel_vis = False
