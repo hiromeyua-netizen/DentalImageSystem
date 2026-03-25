@@ -15,6 +15,8 @@ from typing import Any, List, Optional
 import numpy as np
 from PyQt6.QtCore import QObject, QTimer, pyqtSlot
 
+from view_transforms import apply_view_transforms
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -165,13 +167,21 @@ class CameraService(QObject):
             frame = None
         if frame is None or frame.size == 0:
             return
-        self._provider.update_frame(frame)
+        out = apply_view_transforms(
+            frame,
+            flip_h=self._bridge.flipHorizontal,
+            flip_v=self._bridge.flipVertical,
+            rotate_q=self._bridge.rotateQuarterTurns,
+        )
+        if out is None or out.size == 0:
+            return
+        self._provider.update_frame(out)
         self._bridge.push_frame(self._provider)
         now = time.perf_counter()
         if now - self._stats_t0 < 0.45:
             return
         self._stats_t0 = now
-        h, w = frame.shape[:2]
+        h, w = out.shape[:2]
         fps = float(TARGET_FPS)
         mbps = (w * h * 3.0 * fps) / (1024.0 * 1024.0)
         self._bridge.set_stats(w, h, fps, mbps)

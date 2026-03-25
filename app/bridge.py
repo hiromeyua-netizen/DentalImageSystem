@@ -41,6 +41,9 @@ class DentalBridge(QObject):
     storageSdcardChanged        = pyqtSignal(bool)
     camerasDetectedCountChanged = pyqtSignal(int)
     cameraDiscoveryHintChanged  = pyqtSignal(str)
+    flipHorizontalChanged       = pyqtSignal(bool)
+    flipVerticalChanged         = pyqtSignal(bool)
+    rotateQuarterTurnsChanged   = pyqtSignal(int)
 
     # ── Action signals (connect from outside for real behaviour) ──────────────
     toastRequested = pyqtSignal(str, arguments=["message"])
@@ -81,6 +84,9 @@ class DentalBridge(QObject):
         self._capture_delay_sec  = 10
         self._camera_sound       = False
         self._storage_sdcard     = False
+        self._flip_h             = False
+        self._flip_v             = False
+        self._rotate_q           = 0  # 0–3 clockwise quarter turns
 
     # ── QML-readable properties ───────────────────────────────────────────────
     @pyqtProperty(bool, notify=connectedChanged)
@@ -172,6 +178,15 @@ class DentalBridge(QObject):
 
     @pyqtProperty(str, notify=cameraDiscoveryHintChanged)
     def cameraDiscoveryHint(self): return self._camera_hint
+
+    @pyqtProperty(bool, notify=flipHorizontalChanged)
+    def flipHorizontal(self): return self._flip_h
+
+    @pyqtProperty(bool, notify=flipVerticalChanged)
+    def flipVertical(self): return self._flip_v
+
+    @pyqtProperty(int, notify=rotateQuarterTurnsChanged)
+    def rotateQuarterTurns(self): return self._rotate_q
 
     # ── Python-side setters (called by backend) ───────────────────────────────
     def set_connected(self, v):
@@ -287,16 +302,24 @@ class DentalBridge(QObject):
     def onRecenterRoi(self): self.toast("ROI recentered")
 
     @pyqtSlot()
-    def onFlipH(self): self.toast("Flipped horizontally")
+    def onFlipH(self):
+        self._flip_h = not self._flip_h
+        self.flipHorizontalChanged.emit(self._flip_h)
 
     @pyqtSlot()
-    def onFlipV(self): self.toast("Flipped vertically")
+    def onFlipV(self):
+        self._flip_v = not self._flip_v
+        self.flipVerticalChanged.emit(self._flip_v)
 
     @pyqtSlot()
-    def onRotateCw(self): self.toast("Rotated 90° clockwise")
+    def onRotateCw(self):
+        self._rotate_q = (self._rotate_q + 1) % 4
+        self.rotateQuarterTurnsChanged.emit(self._rotate_q)
 
     @pyqtSlot()
-    def onRotateCcw(self): self.toast("Rotated 90° counter-clockwise")
+    def onRotateCcw(self):
+        self._rotate_q = (self._rotate_q - 1) % 4
+        self.rotateQuarterTurnsChanged.emit(self._rotate_q)
 
     @pyqtSlot(int)
     def onExposureChanged(self, v):

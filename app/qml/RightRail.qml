@@ -66,12 +66,14 @@ Item {
                     width: parent.width
                     iconSource: Qt.resolvedUrl("icons/flip_v.svg")
                     tooltip: "Flip vertical"
+                    isChecked: bridge.flipVertical
                     onClicked: bridge.onFlipV()
                 }
                 RailButton {
                     width: parent.width
                     iconSource: Qt.resolvedUrl("icons/flip_h.svg")
                     tooltip: "Flip horizontal"
+                    isChecked: bridge.flipHorizontal
                     onClicked: bridge.onFlipH()
                 }
                 RailButton {
