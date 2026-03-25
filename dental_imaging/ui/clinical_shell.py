@@ -331,68 +331,97 @@ class RightToolRail(QFrame):
         root.setContentsMargins(8, 14, 8, 14)
         root.setSpacing(6)
 
-        def btn(glyph: str, tip: str, checkable: bool = False, checked: bool = False) -> QToolButton:
+        def btn(
+            glyph: str, tip: str,
+            checkable: bool = False, checked: bool = False,
+            obj_name: str = "",
+        ) -> QToolButton:
             b = QToolButton()
             b.setText(glyph)
             b.setToolTip(tip)
             b.setCheckable(checkable)
             b.setChecked(checked)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
+            if obj_name:
+                b.setObjectName(obj_name)
             return b
 
-        # Flip
-        b_fh = btn("\u2194", "Flip horizontal")
-        b_fh.clicked.connect(self.flip_horizontal_clicked.emit)
-        b_fv = btn("\u2195", "Flip vertical")
+        # ── Flip (pair) ────────────────────────────────────────
+        # ▽▲  two triangles — flip up/down
+        b_fv = btn("\u25bd\u25b2", "Flip vertical")
+        b_fv.setProperty("pair", "1")
         b_fv.clicked.connect(self.flip_vertical_clicked.emit)
+        # ▷◁  inward-facing triangles — flip left/right
+        b_fh = btn("\u25b7\u25c1", "Flip horizontal")
+        b_fh.setProperty("pair", "1")
+        b_fh.clicked.connect(self.flip_horizontal_clicked.emit)
 
-        # Rotate
-        b_rcw = btn("\u21BB", "Rotate clockwise")
+        # ── Rotate (pair) ──────────────────────────────────────
+        # □↻  rotate clockwise
+        b_rcw = btn("\u25a1\u21bb", "Rotate clockwise")
+        b_rcw.setProperty("pair", "1")
         b_rcw.clicked.connect(self.rotate_cw_clicked.emit)
-        b_rcc = btn("\u21BA", "Rotate counter-clockwise")
+        # □↺  rotate counter-clockwise
+        b_rcc = btn("\u25a1\u21ba", "Rotate counter-clockwise")
+        b_rcc.setProperty("pair", "1")
         b_rcc.clicked.connect(self.rotate_ccw_clicked.emit)
 
-        # Image settings
-        self._img_settings = btn("\u25A3", "Image settings", checkable=True, checked=True)
+        # ── Image / gallery ────────────────────────────────────
+        # 🏔 mountain-in-frame feel via landscape emoji
+        self._img_settings = btn(
+            "\U0001f5bc", "Image settings",
+            checkable=True, checked=True, obj_name="imgSettingsBtn",
+        )
         self._img_settings.toggled.connect(self.image_settings_clicked.emit)
 
-        # Settings
-        self._settings_btn = btn("\u2699", "Settings", checkable=True)
+        # ── Settings gear ──────────────────────────────────────
+        self._settings_btn = btn(
+            "\u2699", "Settings",
+            checkable=True, obj_name="settingsBtn",
+        )
         self._settings_btn.toggled.connect(self.settings_toggled.emit)
 
-        # Capture
-        self._capture_btn = btn("\u2316", "Capture image")
+        # ── Capture (camera) ───────────────────────────────────
+        self._capture_btn = btn("\U0001f4f7", "Capture full-resolution image")
         self._capture_btn.clicked.connect(self.capture_clicked.emit)
 
-        # Auto colour
-        self._auto_color_btn = btn("\u25CE", "Auto colour balance", checkable=True)
-        self._auto_color_btn.setObjectName("autoColorBtn")
+        # ── Auto colour (globe / sphere) ───────────────────────
+        self._auto_color_btn = btn(
+            "\U0001f30d", "Auto colour balance",
+            checkable=True, obj_name="autoColorBtn",
+        )
         self._auto_color_btn.toggled.connect(self.auto_color_toggled.emit)
 
-        # Recenter ROI
+        # ── Recenter ROI ───────────────────────────────────────
         b_rcenter = btn("\u2295", "Recenter ROI")
         b_rcenter.clicked.connect(self.recenter_roi_clicked.emit)
 
-        # ROI mode
-        self._roi_mode_btn = btn("\u229E", "ROI mode", checkable=True)
-        self._roi_mode_btn.setObjectName("roiModeBtn")
+        # ── ROI mode (grid square) ─────────────────────────────
+        self._roi_mode_btn = btn(
+            "\u229e", "ROI mode",
+            checkable=True, obj_name="roiModeBtn",
+        )
         self._roi_mode_btn.toggled.connect(self.roi_mode_toggled.emit)
 
-        # Pair buttons side-by-side in a row; single buttons centred
+        # ── Layout helpers ─────────────────────────────────────
         def pair_row(b1: QToolButton, b2: QToolButton) -> None:
             hl = QHBoxLayout()
-            hl.setSpacing(6)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(4)
+            hl.addStretch(1)
             hl.addWidget(b1)
             hl.addWidget(b2)
+            hl.addStretch(1)
             root.addLayout(hl)
 
         def solo_row(b: QToolButton) -> None:
             hl = QHBoxLayout()
+            hl.setContentsMargins(0, 0, 0, 0)
             hl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
             hl.addWidget(b)
             root.addLayout(hl)
 
-        pair_row(b_fh, b_fv)
+        pair_row(b_fv, b_fh)
         pair_row(b_rcw, b_rcc)
         solo_row(self._img_settings)
         solo_row(self._settings_btn)
@@ -414,11 +443,18 @@ class RightToolRail(QFrame):
         self._capture_btn.setEnabled(enabled)
 
     def sync_touch_metrics(self, short_edge: int) -> None:
-        rw      = _clamp_int(short_edge // 11, 72, 96)
-        btn_sz  = _clamp_int(short_edge // 24, 36, 50)
-        pad     = _clamp_int(short_edge // 150, 4, 8)
-        radius  = _clamp_int(short_edge // 160, 6, 10)
-        icon_pt = _clamp_int(short_edge // 72, 14, 20)
+        # Rail width — wide enough for two pair buttons + padding
+        rw      = _clamp_int(short_edge // 9,  88, 118)
+        # Button size — large, clearly tappable
+        btn_sz  = _clamp_int(short_edge // 20, 46, 62)
+        # Pair buttons are smaller so two fit side by side
+        pair_sz = _clamp_int(short_edge // 26, 34, 46)
+        pad     = _clamp_int(short_edge // 130, 6, 10)
+        radius  = _clamp_int(short_edge // 120, 8, 12)
+        # Large icon glyphs — the key change requested
+        icon_pt      = _clamp_int(short_edge // 54, 18, 26)
+        icon_pt_pair = _clamp_int(short_edge // 65, 14, 20)
+
         self.setFixedWidth(rw)
         self.setStyleSheet(
             f"""
@@ -430,35 +466,47 @@ class RightToolRail(QFrame):
                 background-color: transparent;
                 border: none;
                 border-radius: {radius}px;
-                color: rgba(255, 255, 255, 0.80);
+                color: rgba(255, 255, 255, 0.78);
                 font-size: {icon_pt}px;
                 padding: {pad}px;
                 min-width:  {btn_sz}px;
                 min-height: {btn_sz}px;
             }}
-            QToolButton:hover   {{ background-color: rgba(255,255,255,0.10);
-                                   color: #ffffff; }}
-            QToolButton:pressed {{ background-color: rgba(255,255,255,0.18); }}
-            QToolButton:checked {{
-                background-color: rgba(255,255,255,0.14);
+            QToolButton[pair="1"] {{
+                font-size: {icon_pt_pair}px;
+                min-width:  {pair_sz}px;
+                min-height: {pair_sz}px;
+            }}
+            QToolButton:hover   {{
+                background-color: rgba(255,255,255,0.12);
                 color: #ffffff;
-                border: 1px solid rgba(255,255,255,0.25);
+            }}
+            QToolButton:pressed {{ background-color: rgba(255,255,255,0.20); }}
+            QToolButton:checked {{
+                background-color: rgba(255,255,255,0.16);
+                color: #ffffff;
+                border: 1px solid rgba(255,255,255,0.30);
+            }}
+            QToolButton#imgSettingsBtn:checked {{
+                background-color: rgba(255,255,255,0.16);
+                border-color: rgba(255,255,255,0.32);
+                color: #ffffff;
             }}
             QToolButton#autoColorBtn:checked {{
-                background-color: rgba(90,170,110,0.40);
-                border-color: rgba(140,220,160,0.50);
-                color: #cfffcf;
+                background-color: rgba(90,170,110,0.42);
+                border: 1px solid rgba(140,220,160,0.55);
+                color: #d6ffd6;
             }}
             QToolButton#roiModeBtn:checked {{
-                background-color: rgba(90,140,220,0.38);
-                border-color: rgba(140,180,255,0.48);
-                color: #d0deff;
+                background-color: rgba(80,140,220,0.42);
+                border: 1px solid rgba(140,180,255,0.55);
+                color: #d0e4ff;
             }}
             """
         )
-        spacing = _clamp_int(short_edge // 100, 4, 8)
-        mx = _clamp_int(short_edge // 130, 6, 12)
-        my = _clamp_int(short_edge // 75, 10, 18)
+        spacing = _clamp_int(short_edge // 90, 6, 12)
+        mx = _clamp_int(short_edge // 110, 8, 14)
+        my = _clamp_int(short_edge // 72, 12, 20)
         self._root_layout.setContentsMargins(mx, my, mx, my)
         self._root_layout.setSpacing(spacing)
 
