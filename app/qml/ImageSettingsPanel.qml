@@ -17,7 +17,7 @@ Rectangle {
                        : Math.min(324, Math.max(248, w - 48))
     }
     readonly property real contentTop: hdr.height + 10 + sep.height + 12
-    readonly property real contentBottomPadding: compact ? 12 : 14
+    readonly property real contentBottomPadding: compact ? 22 : 24
     readonly property real maxRowsVisibleH: compact ? 360 : 430
     readonly property real rowsViewportH: Math.min(rows.implicitHeight, maxRowsVisibleH)
     height:       contentTop + rowsViewportH + contentBottomPadding
@@ -111,7 +111,7 @@ Rectangle {
             topMargin: compact ? 12 : 14
             leftMargin: compact ? 14 : 16
             rightMargin: compact ? 14 : 16
-            bottomMargin: compact ? 10 : 12
+            bottomMargin: compact ? 16 : 18
         }
         clip: true
         interactive: contentHeight > height
