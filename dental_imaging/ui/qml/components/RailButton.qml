@@ -20,10 +20,11 @@ AbstractButton {
 
     implicitWidth:  54
     implicitHeight: 54
+    height: width
 
     // Background capsule
     background: Rectangle {
-        radius: 10
+        radius: Math.min(width, height) * 0.22
         color: {
             if (root.isChecked)                        return root.activeColor
             if (root.pressed || root.hovered) return Qt.rgba(1, 1, 1, 0.12)
