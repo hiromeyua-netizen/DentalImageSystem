@@ -120,6 +120,34 @@ ApplicationWindow {
                 anchors.margins: 3
                 clip: true
 
+                MouseArea {
+                    id: minimapDragArea
+                    anchors.fill: parent
+                    enabled: minimapChrome.visible
+                    acceptedButtons: Qt.LeftButton
+                    hoverEnabled: true
+                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+
+                    function updatePan(mx, my) {
+                        if (width <= 0 || height <= 0)
+                            return
+                        var nx = Math.max(0.0, Math.min(1.0, mx / width))
+                        var ny = Math.max(0.0, Math.min(1.0, my / height))
+                        bridge.setPreviewPanFromMinimap(nx, ny)
+                    }
+
+                    onPressed: function (mouse) {
+                        updatePan(mouse.x, mouse.y)
+                    }
+                    onPositionChanged: function (mouse) {
+                        if (pressed)
+                            updatePan(mouse.x, mouse.y)
+                    }
+                    onDoubleClicked: function (/*mouse*/) {
+                        bridge.resetPreviewPan()
+                    }
+                }
+
                 Image {
                     anchors.fill: parent
                     fillMode: Image.Stretch

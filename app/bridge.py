@@ -387,6 +387,20 @@ class DentalBridge(QObject):
         """Re-centre the zoomed crop (double-tap / shortcut)."""
         self._reset_preview_pan()
 
+    @pyqtSlot(float, float)
+    def setPreviewPanFromMinimap(self, nx, ny):
+        """Jump/drag pan target from minimap normalized coordinates [0..1]."""
+        if self._zoom <= 2:
+            return
+        nx = max(0.0, min(1.0, float(nx)))
+        ny = max(0.0, min(1.0, float(ny)))
+        if nx != self._pan_x:
+            self._pan_x = nx
+            self.previewPanXChanged.emit(nx)
+        if ny != self._pan_y:
+            self._pan_y = ny
+            self.previewPanYChanged.emit(ny)
+
     @pyqtSlot(int)
     def onPresetClicked(self, idx):
         self.set_active_preset(idx if self._active_preset != idx else -1)
