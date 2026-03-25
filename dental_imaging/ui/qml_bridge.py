@@ -77,8 +77,8 @@ class DentalBridge(QObject):
     activePresetChanged    = pyqtSignal(int)        # -1 = none
     roiModeActiveChanged   = pyqtSignal(bool)
     autoColorActiveChanged = pyqtSignal(bool)
-    imageSettingsChanged   = pyqtSignal(dict)  # all 7 slider values
-    settingsValuesChanged  = pyqtSignal(dict)  # settings panel state
+    imageSettingsChanged   = pyqtSignal('QVariantMap')  # all 7 slider values
+    settingsValuesChanged  = pyqtSignal('QVariantMap')  # settings panel state
     toastRequested         = pyqtSignal(str, int)   # message, duration_ms
     statusChanged          = pyqtSignal(str)
     frameIdChanged         = pyqtSignal(int)
@@ -258,7 +258,7 @@ class DentalBridge(QObject):
 
     # -- Image settings slots --
 
-    @pyqtSlot(result=dict)
+    @pyqtSlot(result='QVariantMap')
     def getImageSettingsValues(self) -> dict:
         iv = self._window.image_settings.get_values()
         return {
@@ -320,7 +320,7 @@ class DentalBridge(QObject):
 
     # -- Settings panel slots --
 
-    @pyqtSlot(result=dict)
+    @pyqtSlot(result='QVariantMap')
     def getSettingsValues(self) -> dict:
         w = self._window
         return {
