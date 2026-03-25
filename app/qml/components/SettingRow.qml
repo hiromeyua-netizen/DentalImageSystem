@@ -15,7 +15,7 @@ Item {
     Column {
         id: inner
         anchors { left: parent.left; right: parent.right; top: parent.top }
-        spacing: 8
+        spacing: 5
 
         Text {
             width: inner.width

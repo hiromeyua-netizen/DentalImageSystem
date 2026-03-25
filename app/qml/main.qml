@@ -69,7 +69,7 @@ ApplicationWindow {
             id: panArea
             z: 1
             anchors.fill: parent
-            enabled: bridge.connected && bridge.zoom > 2 && !bridge.roiMode
+            enabled: bridge.connected && bridge.zoom > 2
             acceptedButtons: Qt.LeftButton
             hoverEnabled: true
             cursorShape: !enabled ? Qt.ArrowCursor
@@ -93,134 +93,6 @@ ApplicationWindow {
             }
             onDoubleClicked: function (/*mouse*/) {
                 bridge.resetPreviewPan()
-            }
-        }
-
-        // ROI overlay: drag the box to move, drag corner handle to resize.
-        Item {
-            id: roiOverlay
-            z: 2
-            anchors.fill: parent
-            visible: bridge.connected
-
-            function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
-            function syncFromBridge() {
-                roiBox.bx = bridge.roiX * roiOverlay.width
-                roiBox.by = bridge.roiY * roiOverlay.height
-                roiBox.bw = Math.max(roiBox.minW, bridge.roiWidth * roiOverlay.width)
-                roiBox.bh = Math.max(roiBox.minH, bridge.roiHeight * roiOverlay.height)
-            }
-
-            onWidthChanged: syncFromBridge()
-            onHeightChanged: syncFromBridge()
-            Component.onCompleted: syncFromBridge()
-
-            Connections {
-                target: bridge
-                function onRoiXChanged() { roiOverlay.syncFromBridge() }
-                function onRoiYChanged() { roiOverlay.syncFromBridge() }
-                function onRoiWidthChanged() { roiOverlay.syncFromBridge() }
-                function onRoiHeightChanged() { roiOverlay.syncFromBridge() }
-            }
-
-            Rectangle {
-                id: roiBox
-                property real minW: 40
-                property real minH: 40
-                property real bx: 0
-                property real by: 0
-                property real bw: 0
-                property real bh: 0
-                x: bx
-                y: by
-                width: bw
-                height: bh
-                color: Qt.rgba(0.20, 0.58, 1.0, bridge.roiMode ? 0.12 : 0.06)
-                border.width: bridge.roiMode ? 2 : 1
-                border.color: bridge.roiMode ? Qt.rgba(0.42, 0.76, 1.0, 0.95) : Qt.rgba(0.75, 0.86, 1.0, 0.40)
-                radius: 6
-                visible: bridge.connected
-
-                MouseArea {
-                    anchors.fill: parent
-                    enabled: bridge.roiMode
-                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                    property real sx: 0
-                    property real sy: 0
-                    property real ox: 0
-                    property real oy: 0
-
-                    onPressed: function (mouse) {
-                        sx = mouse.x
-                        sy = mouse.y
-                        ox = roiBox.x
-                        oy = roiBox.y
-                    }
-                    onPositionChanged: function (mouse) {
-                        if (!pressed)
-                            return
-                        roiBox.bx = roiOverlay.clamp(ox + (mouse.x - sx), 0, roiOverlay.width - roiBox.width)
-                        roiBox.by = roiOverlay.clamp(oy + (mouse.y - sy), 0, roiOverlay.height - roiBox.height)
-                    }
-                    onReleased: {
-                        bridge.setRoiRectNormalized(
-                            roiBox.bx / Math.max(1, roiOverlay.width),
-                            roiBox.by / Math.max(1, roiOverlay.height),
-                            roiBox.width / Math.max(1, roiOverlay.width),
-                            roiBox.height / Math.max(1, roiOverlay.height)
-                        )
-                    }
-                }
-
-                Rectangle {
-                    id: roiHandle
-                    width: 16
-                    height: 16
-                    radius: 8
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.rightMargin: -8
-                    anchors.bottomMargin: -8
-                    color: Qt.rgba(0.42, 0.76, 1.0, 0.95)
-                    border.width: 1
-                    border.color: Qt.rgba(1, 1, 1, 0.70)
-                    visible: bridge.roiMode
-
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: bridge.roiMode
-                        cursorShape: Qt.SizeFDiagCursor
-                        property real sx: 0
-                        property real sy: 0
-                        property real ow: 0
-                        property real oh: 0
-
-                        onPressed: function (mouse) {
-                            sx = mouse.x
-                            sy = mouse.y
-                            ow = roiBox.width
-                            oh = roiBox.height
-                        }
-                        onPositionChanged: function (mouse) {
-                            if (!pressed)
-                                return
-                            var nw = ow + (mouse.x - sx)
-                            var nh = oh + (mouse.y - sy)
-                            nw = Math.max(roiBox.minW, Math.min(nw, roiOverlay.width - roiBox.x))
-                            nh = Math.max(roiBox.minH, Math.min(nh, roiOverlay.height - roiBox.y))
-                            roiBox.bw = nw
-                            roiBox.bh = nh
-                        }
-                        onReleased: {
-                            bridge.setRoiRectNormalized(
-                                roiBox.bx / Math.max(1, roiOverlay.width),
-                                roiBox.by / Math.max(1, roiOverlay.height),
-                                roiBox.bw / Math.max(1, roiOverlay.width),
-                                roiBox.bh / Math.max(1, roiOverlay.height)
-                            )
-                        }
-                    }
-                }
             }
         }
 
@@ -349,6 +221,7 @@ ApplicationWindow {
         id: imgPanel
         x: Math.max(8, Math.min(rightRail.x - width - 10, win.width - width - marginH))
         y: topBar.y + topBar.height + 10
+        maxPanelHeight: win.height - topBar.y - topBar.height - 12 - bottomBar.height - 32
     }
 
     SettingsPanel {

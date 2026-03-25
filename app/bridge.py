@@ -51,10 +51,6 @@ class DentalBridge(QObject):
     minimapViewportWidthChanged = pyqtSignal(float)
     minimapViewportHeightChanged = pyqtSignal(float)
     minimapAspectRatioChanged   = pyqtSignal(float)
-    roiXChanged                 = pyqtSignal(float)
-    roiYChanged                 = pyqtSignal(float)
-    roiWidthChanged             = pyqtSignal(float)
-    roiHeightChanged            = pyqtSignal(float)
 
     # ── Action signals (connect from outside for real behaviour) ──────────────
     toastRequested = pyqtSignal(str, arguments=["message"])
@@ -114,11 +110,6 @@ class DentalBridge(QObject):
         self._mv_w               = 1.0
         self._mv_h               = 1.0
         self._minimap_ar         = 1080.0 / 1920.0  # height / width
-        # ROI rectangle in normalized preview coordinates [0..1].
-        self._roi_x              = 0.30
-        self._roi_y              = 0.30
-        self._roi_w              = 0.40
-        self._roi_h              = 0.40
 
     # ── QML-readable properties ───────────────────────────────────────────────
     @pyqtProperty(bool, notify=connectedChanged)
@@ -241,18 +232,6 @@ class DentalBridge(QObject):
     @pyqtProperty(float, notify=minimapAspectRatioChanged)
     def minimapAspectRatio(self): return self._minimap_ar
 
-    @pyqtProperty(float, notify=roiXChanged)
-    def roiX(self): return self._roi_x
-
-    @pyqtProperty(float, notify=roiYChanged)
-    def roiY(self): return self._roi_y
-
-    @pyqtProperty(float, notify=roiWidthChanged)
-    def roiWidth(self): return self._roi_w
-
-    @pyqtProperty(float, notify=roiHeightChanged)
-    def roiHeight(self): return self._roi_h
-
     # ── Python-side setters (called by backend) ───────────────────────────────
     def set_connected(self, v):
         if self._connected != v:
@@ -333,25 +312,6 @@ class DentalBridge(QObject):
         if self._mv_h != vh:
             self._mv_h = vh
             self.minimapViewportHeightChanged.emit(vh)
-
-    def _set_roi_rect(self, rx: float, ry: float, rw: float, rh: float) -> None:
-        # Keep ROI inside bounds and at least 5% in each dimension.
-        rw = max(0.05, min(1.0, float(rw)))
-        rh = max(0.05, min(1.0, float(rh)))
-        rx = max(0.0, min(1.0 - rw, float(rx)))
-        ry = max(0.0, min(1.0 - rh, float(ry)))
-        if self._roi_x != rx:
-            self._roi_x = rx
-            self.roiXChanged.emit(rx)
-        if self._roi_y != ry:
-            self._roi_y = ry
-            self.roiYChanged.emit(ry)
-        if self._roi_w != rw:
-            self._roi_w = rw
-            self.roiWidthChanged.emit(rw)
-        if self._roi_h != rh:
-            self._roi_h = rh
-            self.roiHeightChanged.emit(rh)
 
     def update_minimap_from_crop(
         self, x0: int, y0: int, cw: int, ch: int, fw: int, fh: int
@@ -448,10 +408,6 @@ class DentalBridge(QObject):
             self._pan_y = ny
             self.previewPanYChanged.emit(ny)
 
-    @pyqtSlot(float, float, float, float)
-    def setRoiRectNormalized(self, x, y, w, h):
-        self._set_roi_rect(x, y, w, h)
-
     @pyqtSlot(int)
     def onPresetClicked(self, idx):
         if self._active_preset == idx:
@@ -523,12 +479,6 @@ class DentalBridge(QObject):
         # Capture prefs
         self._capture_format_png = _b("captureFormatPng", self._capture_format_png, self.captureFormatPngChanged)
         self._image_quality = _i("imageQuality", 1, 100, self._image_quality, self.imageQualityChanged)
-        self._set_roi_rect(
-            float(snap.get("roiX", self._roi_x)),
-            float(snap.get("roiY", self._roi_y)),
-            float(snap.get("roiWidth", self._roi_w)),
-            float(snap.get("roiHeight", self._roi_h)),
-        )
 
     @pyqtSlot(bool)
     def onAutoColorToggled(self, v):
@@ -539,9 +489,7 @@ class DentalBridge(QObject):
     def onRoiModeToggled(self, v): self.set_roi_mode(v)
 
     @pyqtSlot()
-    def onRecenterRoi(self):
-        self._set_roi_rect(0.30, 0.30, 0.40, 0.40)
-        self.toast("ROI recentered")
+    def onRecenterRoi(self): self.toast("ROI recentered")
 
     @pyqtSlot()
     def onFlipH(self):

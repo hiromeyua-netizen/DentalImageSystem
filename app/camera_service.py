@@ -135,10 +135,6 @@ class CameraService(QObject):
             "tint": int(self._bridge.tint),
             "captureFormatPng": bool(self._bridge.captureFormatPng),
             "imageQuality": int(self._bridge.imageQuality),
-            "roiX": float(self._bridge.roiX),
-            "roiY": float(self._bridge.roiY),
-            "roiWidth": float(self._bridge.roiWidth),
-            "roiHeight": float(self._bridge.roiHeight),
         }
 
     @pyqtSlot(int)
@@ -400,34 +396,6 @@ class CameraService(QObject):
         mbps = (w * h * 3.0 * fps) / (1024.0 * 1024.0)
         self._bridge.set_stats(w, h, fps, mbps)
 
-    def _apply_roi_crop_if_enabled(self, frame: np.ndarray) -> np.ndarray:
-        if frame is None or frame.size == 0:
-            return frame
-        if not bool(self._bridge.roiMode):
-            return frame
-        h, w = frame.shape[:2]
-        if w <= 1 or h <= 1:
-            return frame
-        try:
-            rx = max(0.0, min(1.0, float(self._bridge.roiX)))
-            ry = max(0.0, min(1.0, float(self._bridge.roiY)))
-            rw = max(0.05, min(1.0, float(self._bridge.roiWidth)))
-            rh = max(0.05, min(1.0, float(self._bridge.roiHeight)))
-        except Exception:
-            return frame
-        x0 = int(round(rx * w))
-        y0 = int(round(ry * h))
-        cw = max(8, int(round(rw * w)))
-        ch = max(8, int(round(rh * h)))
-        x0 = max(0, min(w - 1, x0))
-        y0 = max(0, min(h - 1, y0))
-        x1 = max(x0 + 1, min(w, x0 + cw))
-        y1 = max(y0 + 1, min(h, y0 + ch))
-        roi = frame[y0:y1, x0:x1]
-        if roi is None or roi.size == 0:
-            return frame
-        return roi
-
     @pyqtSlot()
     def on_capture_requested(self) -> None:
         """Capture current view, apply active image settings, and save to disk."""
@@ -463,7 +431,6 @@ class CameraService(QObject):
                 flip_v=self._bridge.flipVertical,
                 rotate_q=self._bridge.rotateQuarterTurns,
             )
-            out = self._apply_roi_crop_if_enabled(out)
             if out is None or out.size == 0:
                 self._bridge.toast("Capture failed. Please try again.")
                 return
