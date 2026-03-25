@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSlider,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -24,34 +23,75 @@ from PyQt6.QtWidgets import (
 from dental_imaging.ui.widgets.image_settings_component import ImageSettingsComponent
 from dental_imaging.ui.widgets.preview_widget import PreviewWidget
 
-# Semi-transparent dark chrome (~50–55% opacity over live image, reference Occuscope)
-CHROME_BG = "rgba(28, 30, 34, 0.55)"
-CHROME_BORDER = "rgba(255, 255, 255, 0.10)"
-CHROME_RADIUS_PX = 14
+# Chrome constants — translucent dark strip matching the Occuscope reference
+CHROME_BG   = "rgba(20, 22, 26, 0.58)"
+CHROME_BORDER = "rgba(255, 255, 255, 0.09)"
 LABEL_STYLE = "color: #f2f2f2; font-size: 12px;"
-TITLE_STYLE = "color: #ffffff; font-weight: 600; font-size: 13px;"
-MUTED_STYLE = "color: #b0b0b0; font-size: 10px;"
+TITLE_STYLE = "color: #ffffff; font-weight: 700; font-size: 13px; letter-spacing: 0.5px;"
+MUTED_STYLE = "color: #a0a0a8; font-size: 9px; letter-spacing: 0.3px;"
 
 
 def _clamp_int(v: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, v))
 
 
-class ClinicalValueSlider(QSlider):
-    """Horizontal slider with the value drawn inside the circular thumb (reference UI)."""
+# ---------------------------------------------------------------------------
+# Custom slider with value painted inside the circular thumb
+# ---------------------------------------------------------------------------
+
+class ClinicalValueSlider(QWidget):
+    """
+    Horizontal slider where a filled circle shows the current value as a
+    percentage label — matching the Occuscope bottom-bar style.
+    """
+
+    valueChanged = pyqtSignal(int)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(Qt.Orientation.Horizontal, parent)
-        self._handle_r = 14
-        self._groove_h = 6
-        self._h_margin = 6
+        super().__init__(parent)
+        self._value   = 0
+        self._minimum = 0
+        self._maximum = 100
+        self._handle_r = 18
+        self._groove_h = 5
+        self._dragging = False
+        self.setMinimumHeight(self._handle_r * 2 + 8)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def set_visual_metrics(self, handle_r: int, groove_h: int, h_margin: int) -> None:
-        self._handle_r = max(10, handle_r)
-        self._groove_h = max(4, groove_h)
-        self._h_margin = max(4, h_margin)
-        self.setMinimumHeight(self._handle_r * 2 + 6)
+    def set_visual_metrics(self, handle_r: int, groove_h: int) -> None:
+        self._handle_r = max(12, handle_r)
+        self._groove_h = max(3, groove_h)
+        self.setMinimumHeight(self._handle_r * 2 + 8)
         self.update()
+
+    def value(self) -> int:
+        return self._value
+
+    def setValue(self, v: int) -> None:
+        v = _clamp_int(v, self._minimum, self._maximum)
+        if v != self._value:
+            self._value = v
+            self.update()
+            self.valueChanged.emit(v)
+
+    def setRange(self, lo: int, hi: int) -> None:
+        self._minimum, self._maximum = lo, hi
+        self._value = _clamp_int(self._value, lo, hi)
+
+    def _cx_from_value(self) -> int:
+        hr = self._handle_r
+        mx = hr + 2
+        span = self._maximum - self._minimum
+        frac = (self._value - self._minimum) / span if span > 0 else 0.0
+        track_w = max(0, self.width() - 2 * mx)
+        return int(round(mx + frac * track_w))
+
+    def _value_from_x(self, x: int) -> int:
+        hr = self._handle_r
+        mx = hr + 2
+        track_w = max(1, self.width() - 2 * mx)
+        frac = _clamp_int(x - mx, 0, track_w) / track_w
+        return int(round(self._minimum + frac * (self._maximum - self._minimum)))
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -59,43 +99,57 @@ class ClinicalValueSlider(QSlider):
         w, h = self.width(), self.height()
         hr = self._handle_r
         gh = self._groove_h
-        mx = self._h_margin
+        mx = hr + 2
         gw = max(1, w - 2 * mx)
-        gx = mx
         gy = (h - gh) // 2
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255, 42)))
-        painter.drawRoundedRect(gx, gy, gw, gh, gh // 2, gh // 2)
 
-        span = self.maximum() - self.minimum()
-        frac = (
-            (self.value() - self.minimum()) / span
-            if span > 0
-            else 0.0
-        )
-        cx = int(round(gx + hr + frac * max(0.0, gw - 2 * hr)))
+        # Groove
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255, 38)))
+        painter.drawRoundedRect(mx, gy, gw, gh, gh // 2, gh // 2)
+
+        cx = self._cx_from_value()
         cy = h // 2
-        painter.setBrush(QBrush(QColor(255, 255, 255)))
-        painter.setPen(QPen(QColor(0, 0, 0, 55), 1))
+
+        # Thumb — white circle
+        painter.setBrush(QBrush(QColor(255, 255, 255, 240)))
+        painter.setPen(QPen(QColor(180, 180, 180, 80), 1))
         painter.drawEllipse(QPointF(cx, cy), float(hr), float(hr))
 
-        painter.setPen(QPen(QColor(35, 35, 38)))
+        # Value label inside thumb
+        painter.setPen(QPen(QColor(30, 30, 35)))
         f = self.font()
-        f.setPixelSize(_clamp_int(hr - 4, 8, 13))
-        f.setWeight(QFont.Weight.DemiBold)
+        f.setPixelSize(_clamp_int(hr - 5, 8, 13))
+        f.setBold(True)
         painter.setFont(f)
         painter.drawText(
             QRectF(cx - hr, cy - hr, 2 * hr, 2 * hr),
             int(Qt.AlignmentFlag.AlignCenter),
-            f"{self.value()}%",
+            f"{self._value}%",
         )
 
-    def minimumSizeHint(self):
-        return QSize(self._handle_r * 4, self._handle_r * 2 + 8)
+    def mousePressEvent(self, ev) -> None:
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            self.setValue(self._value_from_x(ev.pos().x()))
 
+    def mouseMoveEvent(self, ev) -> None:
+        if self._dragging:
+            self.setValue(self._value_from_x(ev.pos().x()))
+
+    def mouseReleaseEvent(self, ev) -> None:
+        self._dragging = False
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(self._handle_r * 6, self._handle_r * 2 + 8)
+
+
+# ---------------------------------------------------------------------------
+# Top status bar
+# ---------------------------------------------------------------------------
 
 class TopStatusBar(QFrame):
-    """Brand (left), stream stats pill (center-right), power / connection (far right)."""
+    """Brand (left), stream stats (centre), CONNECTED pill + power button (right)."""
 
     power_clicked = pyqtSignal()
 
@@ -104,53 +158,54 @@ class TopStatusBar(QFrame):
         self.setObjectName("TopStatusBar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(56)
-        self.setStyleSheet(
-            f"""
-            QFrame#TopStatusBar {{
-                background-color: {CHROME_BG};
-                border: 1px solid {CHROME_BORDER};
-                border-radius: {CHROME_RADIUS_PX}px;
-            }}
-            """
-        )
+        self._apply_chrome_style()
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setContentsMargins(18, 0, 18, 0)
         layout.setSpacing(16)
 
-        self._brand = QLabel(
-            brand_title.replace(" — ", "\n").upper()
-            if " — " in brand_title
-            else brand_title.upper()
-        )
-        self._brand.setStyleSheet(TITLE_STYLE)
-        self._brand.setWordWrap(True)
+        # --- Brand ---
+        brand_parts = brand_title.split(" — ", 1) if " — " in brand_title else [brand_title, ""]
+        brand_col = QVBoxLayout()
+        brand_col.setSpacing(1)
+        brand_col.setContentsMargins(0, 0, 0, 0)
+        self._brand_main = QLabel(brand_parts[0].upper())
+        self._brand_main.setStyleSheet(TITLE_STYLE)
         f = QFont()
-        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.5)
-        self._brand.setFont(f)
-        layout.addWidget(
-            self._brand, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.8)
+        self._brand_main.setFont(f)
+        brand_col.addWidget(self._brand_main)
+        if brand_parts[1]:
+            self._brand_sub = QLabel(brand_parts[1].upper())
+            self._brand_sub.setStyleSheet(MUTED_STYLE)
+            brand_col.addWidget(self._brand_sub)
+        else:
+            self._brand_sub = None
+        layout.addLayout(brand_col)
 
         layout.addStretch(1)
 
-        self._stats_pill = QFrame()
-        self._stats_pill.setObjectName("TopStatsPill")
-        self._stats_pill.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        spl = QHBoxLayout(self._stats_pill)
-        spl.setContentsMargins(14, 6, 14, 6)
+        # --- Stats (plain text, no pill) ---
         self._stats = QLabel("— X —     — fps     — MB/s")
-        self._stats.setStyleSheet(LABEL_STYLE)
-        spl.addWidget(self._stats)
-        layout.addWidget(self._stats_pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._stats.setStyleSheet(
+            "color: #e8e8e8; font-size: 12px; font-weight: 500; letter-spacing: 0.4px;"
+        )
+        layout.addWidget(self._stats, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        layout.addSpacing(12)
+
+        # --- CONNECTED pill ---
         self._connected = QPushButton("DISCONNECTED")
+        self._connected.setObjectName("ConnectedPill")
         self._connected.setCheckable(True)
         self._connected.setChecked(False)
         self._connected.setEnabled(False)
         self._connected.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout.addWidget(self._connected)
+        layout.addWidget(self._connected, 0, Qt.AlignmentFlag.AlignVCenter)
 
+        layout.addSpacing(6)
+
+        # --- Power button (circle) ---
         self._power = QPushButton("\u23FB")
         self._power.setObjectName("TopPowerButton")
         self._power.setToolTip("Connect")
@@ -161,80 +216,21 @@ class TopStatusBar(QFrame):
 
         self.sync_touch_metrics(1080)
 
+    def _apply_chrome_style(self) -> None:
+        self.setStyleSheet(
+            f"""
+            QFrame#TopStatusBar {{
+                background-color: {CHROME_BG};
+                border-bottom: 1px solid {CHROME_BORDER};
+            }}
+            """
+        )
+
+    # ------------------------------------------------------------------
+
     def set_stats_text(self, width: int, height: int, fps: float, mbps: float) -> None:
         self._stats.setText(
             f"{width} X {height}     {fps:.0f} fps     {mbps:.1f} MB/s"
-        )
-
-    def sync_touch_metrics(self, short_edge: int) -> None:
-        """Scale top bar for display size / touch (called from viewport resize)."""
-        h = _clamp_int(short_edge // 19, 52, 64)
-        self.setFixedHeight(h)
-        stat_pt = _clamp_int(short_edge // 90, 11, 14)
-        title_pt = _clamp_int(short_edge // 85, 12, 16)
-        self._stats.setStyleSheet(
-            f"color: #f2f2f2; font-size: {stat_pt}px; font-weight: 500; letter-spacing: 0.35px;"
-        )
-        self._brand.setStyleSheet(
-            f"color: #ffffff; font-weight: 600; font-size: {title_pt}px;"
-        )
-        pill_pt = _clamp_int(short_edge // 95, 10, 12)
-        pr = _clamp_int(short_edge // 55, 14, 22)
-        self._stats_pill.setStyleSheet(
-            f"""
-            QFrame#TopStatsPill {{
-                background-color: rgba(0, 0, 0, 0.32);
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: {pr}px;
-            }}
-            """
-        )
-        self._connected.setStyleSheet(
-            f"""
-            QPushButton {{
-                background-color: rgba(255, 255, 255, 0.14);
-                color: #f0f0f0;
-                border: 1px solid rgba(255, 255, 255, 0.22);
-                border-radius: {pr}px;
-                padding: 6px 16px;
-                font-size: {pill_pt}px;
-                font-weight: 700;
-                min-height: 28px;
-            }}
-            QPushButton:checked {{
-                background-color: #ffffff;
-                color: #1e1e22;
-                border: 1px solid #ffffff;
-            }}
-            QPushButton:hover {{
-                background-color: rgba(255, 255, 255, 0.22);
-            }}
-            QPushButton:checked:hover {{
-                background-color: #f5f5f7;
-                color: #121216;
-            }}
-            """
-        )
-        pw = _clamp_int(short_edge // 24, 40, 52)
-        power_pt = _clamp_int(short_edge // 50, 18, 26)
-        self._power.setFixedSize(pw, pw)
-        self._power.setStyleSheet(
-            f"""
-            QPushButton#TopPowerButton {{
-                background-color: rgba(255, 255, 255, 0.95);
-                color: #1a1a1f;
-                border: none;
-                border-radius: {pw // 2}px;
-                font-size: {power_pt}px;
-                font-weight: 700;
-            }}
-            QPushButton#TopPowerButton:hover {{
-                background-color: #ffffff;
-            }}
-            QPushButton#TopPowerButton:pressed {{
-                background-color: #e8e8ec;
-            }}
-            """
         )
 
     def set_connected(self, connected: bool) -> None:
@@ -245,294 +241,316 @@ class TopStatusBar(QFrame):
     def set_power_primary_text(self, text: str) -> None:
         self._power.setToolTip(text)
 
+    def sync_touch_metrics(self, short_edge: int) -> None:
+        h = _clamp_int(short_edge // 18, 54, 68)
+        self.setFixedHeight(h)
+
+        title_pt = _clamp_int(short_edge // 83, 12, 16)
+        sub_pt   = _clamp_int(short_edge // 108, 8, 11)
+        stat_pt  = _clamp_int(short_edge // 88, 11, 14)
+        pill_pt  = _clamp_int(short_edge // 95, 10, 13)
+        pill_r   = _clamp_int(short_edge // 50, 14, 24)
+        pw       = _clamp_int(short_edge // 22, 40, 54)
+        pwr_pt   = _clamp_int(short_edge // 52, 16, 24)
+
+        self._brand_main.setStyleSheet(
+            f"color: #ffffff; font-weight: 700; font-size: {title_pt}px; letter-spacing: 0.8px;"
+        )
+        if self._brand_sub is not None:
+            self._brand_sub.setStyleSheet(
+                f"color: #a8a8b0; font-size: {sub_pt}px; letter-spacing: 0.3px;"
+            )
+        self._stats.setStyleSheet(
+            f"color: #e8e8e8; font-size: {stat_pt}px; font-weight: 500; letter-spacing: 0.4px;"
+        )
+        self._connected.setStyleSheet(
+            f"""
+            QPushButton#ConnectedPill {{
+                background-color: rgba(255, 255, 255, 0.10);
+                color: #d8d8d8;
+                border: 1px solid rgba(255, 255, 255, 0.28);
+                border-radius: {pill_r}px;
+                padding: 5px 16px;
+                font-size: {pill_pt}px;
+                font-weight: 700;
+                min-height: 26px;
+                letter-spacing: 0.5px;
+            }}
+            QPushButton#ConnectedPill:checked {{
+                background-color: rgba(255, 255, 255, 0.18);
+                color: #ffffff;
+                border-color: rgba(255, 255, 255, 0.55);
+            }}
+            QPushButton#ConnectedPill:hover {{
+                background-color: rgba(255, 255, 255, 0.16);
+            }}
+            """
+        )
+        self._power.setFixedSize(pw, pw)
+        self._power.setStyleSheet(
+            f"""
+            QPushButton#TopPowerButton {{
+                background-color: rgba(255, 255, 255, 0.92);
+                color: #18181c;
+                border: none;
+                border-radius: {pw // 2}px;
+                font-size: {pwr_pt}px;
+                font-weight: 700;
+            }}
+            QPushButton#TopPowerButton:hover  {{ background-color: #ffffff; }}
+            QPushButton#TopPowerButton:pressed {{ background-color: #e0e0e6; }}
+            """
+        )
+
+
+# ---------------------------------------------------------------------------
+# Right tool rail  (icon-only, no text labels)
+# ---------------------------------------------------------------------------
 
 class RightToolRail(QFrame):
-    """Vertical tool column: icons + labels (reference layout)."""
+    """Narrow vertical icon column — reference Occuscope style (icons only)."""
 
-    flip_vertical_clicked = pyqtSignal()
+    flip_vertical_clicked   = pyqtSignal()
     flip_horizontal_clicked = pyqtSignal()
-    rotate_ccw_clicked = pyqtSignal()
-    rotate_cw_clicked = pyqtSignal()
-    image_settings_clicked = pyqtSignal(bool)
-    settings_toggled = pyqtSignal(bool)
-    capture_clicked = pyqtSignal()
-    auto_color_toggled = pyqtSignal(bool)
-    recenter_roi_clicked = pyqtSignal()
-    roi_mode_toggled = pyqtSignal(bool)
+    rotate_ccw_clicked      = pyqtSignal()
+    rotate_cw_clicked       = pyqtSignal()
+    image_settings_clicked  = pyqtSignal(bool)
+    settings_toggled        = pyqtSignal(bool)
+    capture_clicked         = pyqtSignal()
+    auto_color_toggled      = pyqtSignal(bool)
+    recenter_roi_clicked    = pyqtSignal()
+    roi_mode_toggled        = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("RightToolRail")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self._rail_labels: list[QLabel] = []
-        self._root_layout: Optional[QVBoxLayout] = None
 
         root = QVBoxLayout(self)
         self._root_layout = root
-        root.setContentsMargins(10, 16, 12, 16)
-        root.setSpacing(14)
+        root.setContentsMargins(8, 14, 8, 14)
+        root.setSpacing(6)
 
-        def row(icon: str, label: str, *buttons: QToolButton) -> None:
-            h = QHBoxLayout()
-            h.setSpacing(8)
-            for b in buttons:
-                h.addWidget(b, 0, Qt.AlignmentFlag.AlignCenter)
-            lab = QLabel(label)
-            lab.setStyleSheet(LABEL_STYLE)
-            lab.setWordWrap(True)
-            self._rail_labels.append(lab)
-            h.addWidget(lab, 1)
-            root.addLayout(h)
+        def btn(glyph: str, tip: str, checkable: bool = False, checked: bool = False) -> QToolButton:
+            b = QToolButton()
+            b.setText(glyph)
+            b.setToolTip(tip)
+            b.setCheckable(checkable)
+            b.setChecked(checked)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            return b
 
-        # Order matches reference: horizontal flip, vertical flip, CW, CCW, gallery, …
-        b_fh = QToolButton()
-        b_fh.setText("\u2194")
-        b_fh.setToolTip("Flip horizontal")
+        # Flip
+        b_fh = btn("\u2194", "Flip horizontal")
         b_fh.clicked.connect(self.flip_horizontal_clicked.emit)
-        b_fv = QToolButton()
-        b_fv.setText("\u2195")
-        b_fv.setToolTip("Flip vertical")
+        b_fv = btn("\u2195", "Flip vertical")
         b_fv.clicked.connect(self.flip_vertical_clicked.emit)
-        row("", "Flip", b_fh, b_fv)
 
-        b_r = QToolButton()
-        b_r.setText("\u21bb")
-        b_r.setToolTip("Rotate clockwise")
-        b_r.clicked.connect(self.rotate_cw_clicked.emit)
-        b_rc = QToolButton()
-        b_rc.setText("\u21ba")
-        b_rc.setToolTip("Rotate counter-clockwise")
-        b_rc.clicked.connect(self.rotate_ccw_clicked.emit)
-        row("", "Rotate", b_r, b_rc)
+        # Rotate
+        b_rcw = btn("\u21BB", "Rotate clockwise")
+        b_rcw.clicked.connect(self.rotate_cw_clicked.emit)
+        b_rcc = btn("\u21BA", "Rotate counter-clockwise")
+        b_rcc.clicked.connect(self.rotate_ccw_clicked.emit)
 
-        self._img_settings = QToolButton()
-        self._img_settings.setText("\u25A3")
-        self._img_settings.setToolTip("Image settings (exposure, color, …)")
-        self._img_settings.setCheckable(True)
-        self._img_settings.setChecked(True)
+        # Image settings
+        self._img_settings = btn("\u25A3", "Image settings", checkable=True, checked=True)
         self._img_settings.toggled.connect(self.image_settings_clicked.emit)
-        row("", "Image / gallery", self._img_settings)
 
-        self._settings_btn = QToolButton()
-        self._settings_btn.setText("\u2699")
-        self._settings_btn.setToolTip("Settings")
-        self._settings_btn.setCheckable(True)
-        self._settings_btn.setChecked(False)
+        # Settings
+        self._settings_btn = btn("\u2699", "Settings", checkable=True)
         self._settings_btn.toggled.connect(self.settings_toggled.emit)
-        row("", "Settings", self._settings_btn)
 
-        self._capture_btn = QToolButton()
-        self._capture_btn.setText("\U0001f4f7")
-        self._capture_btn.setToolTip("Capture full-resolution image")
+        # Capture
+        self._capture_btn = btn("\u2316", "Capture image")
         self._capture_btn.clicked.connect(self.capture_clicked.emit)
-        row("", "Capture", self._capture_btn)
 
-        self._auto_color_btn = QToolButton()
+        # Auto colour
+        self._auto_color_btn = btn("\u25CE", "Auto colour balance", checkable=True)
         self._auto_color_btn.setObjectName("autoColorBtn")
-        self._auto_color_btn.setText("\u25CE")
-        self._auto_color_btn.setToolTip("Auto color balance")
-        self._auto_color_btn.setCheckable(True)
-        self._auto_color_btn.setChecked(False)
         self._auto_color_btn.toggled.connect(self.auto_color_toggled.emit)
-        row("", "Color balance", self._auto_color_btn)
 
-        b_roi0 = QToolButton()
-        b_roi0.setText("\u2316")
-        b_roi0.setToolTip("Recenter ROI")
-        b_roi0.clicked.connect(self.recenter_roi_clicked.emit)
-        row("", "Recenter ROI", b_roi0)
+        # Recenter ROI
+        b_rcenter = btn("\u2295", "Recenter ROI")
+        b_rcenter.clicked.connect(self.recenter_roi_clicked.emit)
 
-        self._roi_mode_btn = QToolButton()
+        # ROI mode
+        self._roi_mode_btn = btn("\u229E", "ROI mode", checkable=True)
         self._roi_mode_btn.setObjectName("roiModeBtn")
-        self._roi_mode_btn.setText("\u229E")
-        self._roi_mode_btn.setToolTip("ROI mode (draw region)")
-        self._roi_mode_btn.setCheckable(True)
-        self._roi_mode_btn.setChecked(False)
         self._roi_mode_btn.toggled.connect(self.roi_mode_toggled.emit)
-        row("", "ROI", self._roi_mode_btn)
 
+        # Pair buttons side-by-side in a row; single buttons centred
+        def pair_row(b1: QToolButton, b2: QToolButton) -> None:
+            hl = QHBoxLayout()
+            hl.setSpacing(6)
+            hl.addWidget(b1)
+            hl.addWidget(b2)
+            root.addLayout(hl)
+
+        def solo_row(b: QToolButton) -> None:
+            hl = QHBoxLayout()
+            hl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            hl.addWidget(b)
+            root.addLayout(hl)
+
+        pair_row(b_fh, b_fv)
+        pair_row(b_rcw, b_rcc)
+        solo_row(self._img_settings)
+        solo_row(self._settings_btn)
+        solo_row(self._capture_btn)
+        solo_row(self._auto_color_btn)
+        solo_row(b_rcenter)
+        solo_row(self._roi_mode_btn)
         root.addStretch(1)
 
         self.sync_touch_metrics(1080)
 
-    def image_settings_button(self) -> QToolButton:
-        return self._img_settings
-
-    def settings_tool_button(self) -> QToolButton:
-        return self._settings_btn
-
-    def auto_color_button(self) -> QToolButton:
-        return self._auto_color_btn
-
-    def roi_mode_button(self) -> QToolButton:
-        return self._roi_mode_btn
+    # ------------------------------------------------------------------
+    def image_settings_button(self) -> QToolButton:  return self._img_settings
+    def settings_tool_button(self) -> QToolButton:   return self._settings_btn
+    def auto_color_button(self) -> QToolButton:      return self._auto_color_btn
+    def roi_mode_button(self) -> QToolButton:        return self._roi_mode_btn
 
     def set_capture_enabled(self, enabled: bool) -> None:
         self._capture_btn.setEnabled(enabled)
 
     def sync_touch_metrics(self, short_edge: int) -> None:
-        rw = _clamp_int(short_edge // 5, 200, 244)
+        rw      = _clamp_int(short_edge // 11, 72, 96)
+        btn_sz  = _clamp_int(short_edge // 24, 36, 50)
+        pad     = _clamp_int(short_edge // 150, 4, 8)
+        radius  = _clamp_int(short_edge // 160, 6, 10)
+        icon_pt = _clamp_int(short_edge // 72, 14, 20)
         self.setFixedWidth(rw)
-        btn_min = _clamp_int(short_edge // 22, 46, 58)
-        pad = _clamp_int(short_edge // 135, 6, 10)
-        radius = _clamp_int(short_edge // 180, 6, 10)
-        icon_pt = _clamp_int(short_edge // 68, 15, 20)
-        lbl_pt = _clamp_int(short_edge // 78, 11, 14)
-        rr = _clamp_int(short_edge // 55, 10, 18)
         self.setStyleSheet(
             f"""
             QFrame#RightToolRail {{
                 background-color: {CHROME_BG};
-                border: 1px solid {CHROME_BORDER};
-                border-radius: {rr}px;
+                border-left: 1px solid {CHROME_BORDER};
             }}
             QToolButton {{
-                background-color: rgba(255,255,255,0.07);
-                border: 1px solid rgba(255,255,255,0.14);
+                background-color: transparent;
+                border: none;
                 border-radius: {radius}px;
-                color: #fff;
+                color: rgba(255, 255, 255, 0.80);
                 font-size: {icon_pt}px;
                 padding: {pad}px;
-                min-width: {btn_min}px;
-                min-height: {btn_min}px;
+                min-width:  {btn_sz}px;
+                min-height: {btn_sz}px;
             }}
-            QToolButton:hover {{ background-color: rgba(255,255,255,0.16); }}
-            QToolButton:pressed {{ background-color: rgba(255,255,255,0.22); }}
-            QToolButton:checked {{ background-color: rgba(80, 140, 220, 0.38);
-                border-color: rgba(140, 180, 240, 0.45); }}
-            QToolButton#autoColorBtn:checked, QToolButton#roiModeBtn:checked {{
-                background-color: rgba(90, 170, 110, 0.48);
-                border-color: rgba(140, 220, 160, 0.55);
+            QToolButton:hover   {{ background-color: rgba(255,255,255,0.10);
+                                   color: #ffffff; }}
+            QToolButton:pressed {{ background-color: rgba(255,255,255,0.18); }}
+            QToolButton:checked {{
+                background-color: rgba(255,255,255,0.14);
+                color: #ffffff;
+                border: 1px solid rgba(255,255,255,0.25);
+            }}
+            QToolButton#autoColorBtn:checked {{
+                background-color: rgba(90,170,110,0.40);
+                border-color: rgba(140,220,160,0.50);
+                color: #cfffcf;
+            }}
+            QToolButton#roiModeBtn:checked {{
+                background-color: rgba(90,140,220,0.38);
+                border-color: rgba(140,180,255,0.48);
+                color: #d0deff;
             }}
             """
         )
-        for lab in self._rail_labels:
-            lab.setStyleSheet(
-                f"color: #f2f2f2; font-size: {lbl_pt}px; font-weight: 500;"
-            )
-        if self._root_layout is not None:
-            mx = _clamp_int(short_edge // 110, 8, 14)
-            my = _clamp_int(short_edge // 68, 12, 20)
-            self._root_layout.setContentsMargins(mx, my, mx, my)
-            self._root_layout.setSpacing(_clamp_int(short_edge // 77, 10, 16))
+        spacing = _clamp_int(short_edge // 100, 4, 8)
+        mx = _clamp_int(short_edge // 130, 6, 12)
+        my = _clamp_int(short_edge // 75, 10, 18)
+        self._root_layout.setContentsMargins(mx, my, mx, my)
+        self._root_layout.setSpacing(spacing)
 
+
+# ---------------------------------------------------------------------------
+# Bottom control bar
+# ---------------------------------------------------------------------------
 
 class BottomControlBar(QFrame):
-    """Brightness and zoom sliders + preset chips."""
+    """Brightness + zoom sliders with icon bookends, plus preset chips."""
 
-    brightness_changed = pyqtSignal(int)
-    zoom_changed = pyqtSignal(int)
-    preset_clicked = pyqtSignal(int)
+    brightness_changed   = pyqtSignal(int)
+    zoom_changed         = pyqtSignal(int)
+    preset_clicked       = pyqtSignal(int)
     preset_save_requested = pyqtSignal(int)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("BottomControlBar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self._grid = QGridLayout(self)
-        grid = self._grid
-        grid.setContentsMargins(20, 10, 20, 14)
-        grid.setHorizontalSpacing(28)
-        grid.setVerticalSpacing(6)
 
-        def labeled_slider(
-            title: str, left_caption: str, right_caption: str, default: int = 50
-        ):
-            t = QLabel(title)
-            t.setStyleSheet("font-weight: 600; color: #fff; font-size: 12px;")
+        # Main layout: HBox with [brightness section] [zoom section] [presets]
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(20, 8, 20, 10)
+        outer.setSpacing(32)
+        self._outer = outer
+
+        def glyph_label(text: str, large: bool = False) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setObjectName("GlyphLarge" if large else "GlyphSmall")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            return lbl
+
+        def slider_section(
+            left_text: str, right_text: str,
+            right_large: bool, default: int
+        ) -> tuple[QHBoxLayout, ClinicalValueSlider]:
             sl = ClinicalValueSlider()
             sl.setRange(0, 100)
             sl.setValue(default)
-            foot = QHBoxLayout()
-            a = QLabel(left_caption)
-            a.setStyleSheet(MUTED_STYLE)
-            b = QLabel(right_caption)
-            b.setStyleSheet(MUTED_STYLE)
-            b.setAlignment(Qt.AlignmentFlag.AlignRight)
-            foot.addWidget(a)
-            foot.addStretch()
-            foot.addWidget(b)
-            return t, sl, foot
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            row.addWidget(glyph_label(left_text), 0, Qt.AlignmentFlag.AlignVCenter)
+            row.addWidget(sl, 1)
+            row.addWidget(
+                glyph_label(right_text, large=right_large),
+                0, Qt.AlignmentFlag.AlignVCenter,
+            )
+            return row, sl
 
-        self._br_title, br_sl, br_foot = labeled_slider(
-            "Brightness", "OFF", "HIGH", 50
+        br_row, self._brightness_slider = slider_section(
+            "\u2600", "\u2600", right_large=True, default=50
         )
-        self._brightness_slider = br_sl
-        br_sl.valueChanged.connect(self.brightness_changed.emit)
+        self._brightness_slider.valueChanged.connect(self.brightness_changed.emit)
 
-        self._zm_title, zm_sl, zm_foot = labeled_slider(
-            "Zoom", "Widest", "Tightest", 0
+        zm_row, self._zoom_slider = slider_section(
+            "\u2296", "\u2295", right_large=False, default=0
         )
-        self._zoom_slider = zm_sl
-        zm_sl.valueChanged.connect(self.zoom_changed.emit)
+        self._zoom_slider.valueChanged.connect(self.zoom_changed.emit)
 
-        grid.addWidget(self._br_title, 0, 0, 1, 2)
-        grid.addWidget(self._zm_title, 0, 2, 1, 2)
+        br_wrap = QWidget()
+        br_wrap.setLayout(br_row)
+        zm_wrap = QWidget()
+        zm_wrap.setLayout(zm_row)
 
-        def slider_row(
-            left_glyph: str,
-            slider: ClinicalValueSlider,
-            right_glyph: str | None,
-            *,
-            right_large: bool = False,
-        ) -> QWidget:
-            row = QWidget()
-            hl = QHBoxLayout(row)
-            hl.setContentsMargins(0, 0, 0, 0)
-            hl.setSpacing(10)
-            left_lbl = QLabel(left_glyph)
-            left_lbl.setObjectName("BottomBarGlyph")
-            left_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            left_lbl.setFixedWidth(36)
-            hl.addWidget(left_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-            hl.addWidget(slider, 1)
-            if right_glyph is not None:
-                right_lbl = QLabel(right_glyph)
-                right_lbl.setObjectName(
-                    "BottomBarGlyphLarge" if right_large else "BottomBarGlyph"
-                )
-                right_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                right_lbl.setFixedWidth(44 if right_large else 36)
-                hl.addWidget(right_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-            return row
+        outer.addWidget(br_wrap, 3)
+        outer.addWidget(zm_wrap, 3)
 
-        br_row = slider_row("\u2600", br_sl, "\u2600", right_large=True)
-        zm_out = "\U0001f50d\u2212"
-        zm_in = "\U0001f50d+"
-        zm_row = slider_row(zm_out, zm_sl, zm_in)
-        grid.addWidget(br_row, 1, 0, 1, 2)
-        grid.addWidget(zm_row, 1, 2, 1, 2)
-
-        self._br_footer_wrap = QWidget()
-        wfl = QVBoxLayout(self._br_footer_wrap)
-        wfl.setContentsMargins(0, 0, 0, 0)
-        wfl.addLayout(br_foot)
-        grid.addWidget(self._br_footer_wrap, 2, 0, 1, 2)
-        self._zm_footer_wrap = QWidget()
-        zfl = QVBoxLayout(self._zm_footer_wrap)
-        zfl.setContentsMargins(0, 0, 0, 0)
-        zfl.addLayout(zm_foot)
-        grid.addWidget(self._zm_footer_wrap, 2, 2, 1, 2)
-
-        preset_box = QVBoxLayout()
+        # Preset chips  ① ② ③
+        preset_col = QVBoxLayout()
+        preset_col.setSpacing(4)
         self._preset_label = QLabel("Presets")
-        preset_lbl = self._preset_label
-        preset_lbl.setStyleSheet(MUTED_STYLE)
-        preset_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preset_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         preset_row = QHBoxLayout()
-        preset_row.setSpacing(10)
-        self._preset_buttons = []
+        preset_row.setSpacing(8)
+
+        self._preset_buttons: list[QPushButton] = []
         self._preset_press_timers: dict[int, QTimer] = {}
         self._preset_longpress_fired: dict[int, bool] = {}
+
+        circled = ["\u2460", "\u2461", "\u2462"]   # ① ② ③
         for i in range(3):
-            p = QPushButton(str(i + 1))
+            p = QPushButton(circled[i])
             p.setObjectName("presetChip")
             p.setCursor(Qt.CursorShape.PointingHandCursor)
             p.setCheckable(True)
             p.setAutoExclusive(True)
             p.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             idx = i
-            p.clicked.connect(lambda checked=False, n=idx: self._emit_preset_click_if_not_longpress(n))
+            p.clicked.connect(
+                lambda _checked=False, n=idx: self._emit_preset_click_if_not_longpress(n)
+            )
             p.customContextMenuRequested.connect(
                 lambda _pos, n=idx: self.preset_save_requested.emit(n)
             )
@@ -546,86 +564,75 @@ class BottomControlBar(QFrame):
             p.released.connect(lambda n=idx: self._on_preset_released(n))
             preset_row.addWidget(p)
             self._preset_buttons.append(p)
-        preset_box.addWidget(preset_lbl)
-        preset_box.addLayout(preset_row)
-        grid.addLayout(preset_box, 0, 4, 3, 1)
-        grid.setColumnStretch(1, 2)
-        grid.setColumnStretch(3, 2)
+
+        preset_col.addWidget(self._preset_label)
+        preset_col.addLayout(preset_row)
+        preset_col.addStretch(1)
+        outer.addLayout(preset_col)
 
         self.sync_touch_metrics(1080)
 
+    # ------------------------------------------------------------------
+
     def sync_touch_metrics(self, short_edge: int) -> None:
-        bar_h = _clamp_int(short_edge // 9, 112, 148)
+        bar_h      = _clamp_int(short_edge // 10, 90, 124)
+        gh         = _clamp_int(short_edge // 145, 4, 8)
+        hr         = _clamp_int(short_edge // 44, 18, 28)
+        chip       = _clamp_int(short_edge // 22, 44, 58)
+        chip_r     = chip // 2
+        chip_pt    = _clamp_int(short_edge // 32, 16, 22)
+        glyph_sm   = _clamp_int(short_edge // 62, 14, 20)
+        glyph_lg   = _clamp_int(short_edge // 46, 18, 26)
+        muted_pt   = _clamp_int(short_edge // 105, 9, 11)
+        mx         = _clamp_int(short_edge // 54, 14, 26)
+        my         = _clamp_int(short_edge // 110, 6, 12)
+
         self.setFixedHeight(bar_h)
-        gh = _clamp_int(short_edge // 135, 7, 11)
-        hw = _clamp_int(short_edge // 42, 22, 32)
-        chip = _clamp_int(short_edge // 21, 50, 64)
-        chip_r = chip // 2
-        title_pt = _clamp_int(short_edge // 88, 11, 14)
-        glyph_pt = _clamp_int(short_edge // 55, 16, 22)
-        muted_pt = _clamp_int(short_edge // 100, 9, 11)
-        mx = _clamp_int(short_edge // 54, 16, 28)
-        my = _clamp_int(short_edge // 108, 8, 14)
-        self._grid.setContentsMargins(mx, my, mx, my)
-        self._grid.setHorizontalSpacing(_clamp_int(short_edge // 38, 22, 32))
-        self._grid.setVerticalSpacing(_clamp_int(short_edge // 180, 5, 8))
-        br = _clamp_int(short_edge // 55, 10, 18)
+        self._outer.setContentsMargins(mx, my, mx, my)
+        self._outer.setSpacing(_clamp_int(short_edge // 34, 24, 40))
+
         self.setStyleSheet(
             f"""
             QFrame#BottomControlBar {{
                 background-color: {CHROME_BG};
-                border: 1px solid {CHROME_BORDER};
-                border-radius: {br}px;
+                border-top: 1px solid {CHROME_BORDER};
             }}
-            QLabel#BottomBarGlyph {{
-                color: rgba(255,255,255,0.88);
-                font-size: {glyph_pt}px;
-                font-weight: 500;
+            QLabel#GlyphSmall {{
+                color: rgba(255,255,255,0.80);
+                font-size: {glyph_sm}px;
             }}
-            QLabel#BottomBarGlyphLarge {{
-                color: rgba(255,255,255,0.92);
-                font-size: {_clamp_int(glyph_pt * 4 // 3, 18, 28)}px;
-                font-weight: 500;
+            QLabel#GlyphLarge {{
+                color: rgba(255,255,255,0.90);
+                font-size: {glyph_lg}px;
             }}
             QPushButton#presetChip {{
-                background-color: rgba(255,255,255,0.11);
-                border: 1px solid rgba(255,255,255,0.22);
+                background-color: transparent;
+                border: 2px solid rgba(255,255,255,0.45);
                 border-radius: {chip_r}px;
-                color: #fff;
-                min-width: {chip}px;
+                color: rgba(255,255,255,0.80);
+                min-width:  {chip}px;
                 min-height: {chip}px;
-                font-weight: 700;
-                font-size: {_clamp_int(short_edge // 36, 15, 19)}px;
+                font-size: {chip_pt}px;
+                font-weight: 400;
             }}
-            QPushButton#presetChip:hover {{ background-color: rgba(255,255,255,0.2); }}
-            QPushButton#presetChip:pressed {{ background-color: rgba(255,255,255,0.26); }}
+            QPushButton#presetChip:hover {{
+                background-color: rgba(255,255,255,0.10);
+                color: #ffffff;
+            }}
             QPushButton#presetChip:checked {{
-                background-color: rgba(255,255,255,0.26);
-                border-color: rgba(255,255,255,0.42);
+                background-color: rgba(255,255,255,0.18);
+                border-color: rgba(255,255,255,0.80);
+                color: #ffffff;
             }}
             """
         )
-        self._br_title.setStyleSheet(
-            f"font-weight: 600; color: #fff; font-size: {title_pt}px;"
+        for sl in (self._brightness_slider, self._zoom_slider):
+            sl.set_visual_metrics(hr, gh)
+        self._preset_label.setStyleSheet(
+            f"color: #a0a0a8; font-size: {muted_pt}px; letter-spacing: 0.3px;"
         )
-        self._zm_title.setStyleSheet(
-            f"font-weight: 600; color: #fff; font-size: {title_pt}px;"
-        )
-        self._brightness_slider.set_visual_metrics(hw, gh, _clamp_int(short_edge // 160, 5, 10))
-        self._zoom_slider.set_visual_metrics(hw, gh, _clamp_int(short_edge // 160, 5, 10))
-        muted = f"color: #b0b0b0; font-size: {muted_pt}px;"
-        for lbl in self._br_footer_wrap.findChildren(QLabel):
-            lbl.setStyleSheet(muted)
-        for lbl in self._zm_footer_wrap.findChildren(QLabel):
-            lbl.setStyleSheet(muted)
-        self._preset_label.setStyleSheet(muted)
-        gw = _clamp_int(short_edge // 30, 32, 44)
-        for gl in self.findChildren(QLabel):
-            on = gl.objectName()
-            if on == "BottomBarGlyph":
-                gl.setFixedWidth(gw)
-            elif on == "BottomBarGlyphLarge":
-                gl.setFixedWidth(_clamp_int(gw * 11 // 9, 40, 56))
+
+    # ------------------------------------------------------------------
 
     def brightness_percent(self) -> int:
         return self._brightness_slider.value()
@@ -640,8 +647,6 @@ class BottomControlBar(QFrame):
         self._zoom_slider.setValue(max(0, min(100, int(value))))
 
     def set_active_preset(self, index: int) -> None:
-        if not hasattr(self, "_preset_buttons"):
-            return
         if 0 <= index < len(self._preset_buttons):
             self._preset_buttons[index].setChecked(True)
 
@@ -667,10 +672,14 @@ class BottomControlBar(QFrame):
         self.preset_clicked.emit(index)
 
 
+# ---------------------------------------------------------------------------
+# Full-bleed viewport (preview fills 100%, chrome overlaid at edges)
+# ---------------------------------------------------------------------------
+
 class ClinicalViewport(QWidget):
     """
-    Full-bleed live preview with overlaid chrome: top bar, right rail, bottom bar,
-    and optional floating Image Settings panel (positioned left of the rail).
+    Full-bleed live preview with overlaid chrome: top bar (full width), right
+    rail (right edge), bottom bar (left of rail) — Occuscope layout.
     """
 
     def __init__(
@@ -682,11 +691,11 @@ class ClinicalViewport(QWidget):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self._preview = preview
-        self._overlay = image_settings
+        self._preview  = preview
+        self._overlay  = image_settings
         self._settings = settings_panel
-        self._top = TopStatusBar(brand_title, self)
-        self._right = RightToolRail(self)
+        self._top    = TopStatusBar(brand_title, self)
+        self._right  = RightToolRail(self)
         self._bottom = BottomControlBar(self)
 
         preview.setParent(self)
@@ -698,6 +707,7 @@ class ClinicalViewport(QWidget):
             self._settings.setParent(self)
             self._settings.hide()
 
+        # Stacking order: preview at back, chrome on top
         self._top.raise_()
         self._right.raise_()
         self._bottom.raise_()
@@ -705,84 +715,80 @@ class ClinicalViewport(QWidget):
         if self._settings is not None:
             self._settings.raise_()
 
-    def top_bar(self) -> TopStatusBar:
-        return self._top
-
-    def right_rail(self) -> RightToolRail:
-        return self._right
-
-    def bottom_bar(self) -> BottomControlBar:
-        return self._bottom
-
-    def preview_widget(self) -> PreviewWidget:
-        return self._preview
-
-    def settings_panel(self) -> Optional[QWidget]:
-        return self._settings
+    # ------------------------------------------------------------------
+    def top_bar(self)     -> TopStatusBar:     return self._top
+    def right_rail(self)  -> RightToolRail:    return self._right
+    def bottom_bar(self)  -> BottomControlBar: return self._bottom
+    def preview_widget(self) -> PreviewWidget: return self._preview
+    def settings_panel(self) -> Optional[QWidget]: return self._settings
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.layout_chrome()
 
     def layout_chrome(self) -> None:
-        """Position preview, rails, and floating panels (safe to call when toggling visibility)."""
+        """Edge-flush overlay layout matching the Occuscope reference."""
         w, h = self.width(), self.height()
         short = max(480, min(w, h))
+
+        # Update scale-dependent metrics first so fixed sizes are correct
         self._top.sync_touch_metrics(short)
         self._right.sync_touch_metrics(short)
         self._bottom.sync_touch_metrics(short)
+
         th = self._top.height()
         rw = self._right.width()
         bh = self._bottom.height()
 
-        inset = _clamp_int(short // 72, 10, 22)
-        gap = _clamp_int(short // 120, 4, 8)
-        rail_top = inset + th + gap
-        bottom_top = h - bh - inset
-        rail_h = max(40, bottom_top - rail_top - gap)
-
+        # Preview fills the full viewport (chrome is overlaid on top)
         self._preview.setGeometry(0, 0, w, h)
-        self._top.setGeometry(inset, inset, max(0, w - 2 * inset), th)
-        self._right.setGeometry(w - rw - inset, rail_top, rw, rail_h)
-        self._bottom.setGeometry(inset, bottom_top, max(0, w - 2 * inset), bh)
 
-        preview_h = max(0, bottom_top - rail_top - gap)
-        margin = 10
+        # Top bar: full width at top edge
+        self._top.setGeometry(0, 0, w, th)
+
+        # Right rail: right edge, between top bar and bottom bar
+        rail_top = th
+        rail_h   = max(40, h - th - bh)
+        self._right.setGeometry(w - rw, rail_top, rw, rail_h)
+
+        # Bottom bar: full width minus the rail, at bottom edge
+        self._bottom.setGeometry(0, h - bh, w - rw, bh)
+
+        # --- Floating image-settings overlay ---
+        preview_w = w - rw
+        margin = 12
         panel = self._overlay
         panel.adjustSize()
-        pw = panel.width()
-        ph = panel.height()
-        x = w - rw - inset - pw - margin
-        y = rail_top + margin
-        if x < inset + margin:
-            x = inset + margin
-        if y + ph > bottom_top - margin:
-            y = max(rail_top + margin, bottom_top - ph - margin)
+        pw, ph = panel.width(), panel.height()
+        x = preview_w - pw - margin
+        y = th + margin
+        if x < margin:
+            x = margin
+        if y + ph > h - bh - margin:
+            y = max(th + margin, h - bh - ph - margin)
         panel.move(x, y)
 
         settings_visible = self._settings is not None and self._settings.isVisible()
         if settings_visible:
-            # Never stack both floating panels; this causes visual artifacts.
-            self._overlay.hide()
+            self._overlay.hide()   # mutual exclusion
 
         if self._settings is not None and self._settings.isVisible():
             margin_s = 14
-            avail_h = max(200, preview_h - 2 * margin_s)
+            avail_h  = max(200, h - th - bh - 2 * margin_s)
             if hasattr(self._settings, "set_responsive_metrics"):
-                self._settings.set_responsive_metrics(
-                    w - rw - inset - 2 * margin_s, preview_h
-                )
+                self._settings.set_responsive_metrics(preview_w - 2 * margin_s, h - th - bh)
             self._settings.setMaximumHeight(avail_h)
             self._settings.adjustSize()
             sw = self._settings.width()
             sh = min(self._settings.sizeHint().height(), avail_h)
             self._settings.resize(sw, sh)
-            sx = max(margin_s + inset, w - rw - inset - sw - margin_s)
-            sy = rail_top + margin_s
-            if sy + sh > bottom_top - margin_s:
-                sy = max(rail_top + margin_s, bottom_top - sh - margin_s)
+            sx = max(margin_s, preview_w - sw - margin_s)
+            sy = th + margin_s
+            if sy + sh > h - bh - margin_s:
+                sy = max(th + margin_s, h - bh - sh - margin_s)
             self._settings.move(sx, sy)
             self._settings.raise_()
+
         if not settings_visible and self._overlay.isVisible():
             self._overlay.raise_()
         if self._settings is not None and self._settings.isVisible():
