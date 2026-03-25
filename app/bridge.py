@@ -60,6 +60,8 @@ class DentalBridge(QObject):
     captureFailed  = pyqtSignal(str, arguments=["message"])
     #: After Image Settings reset — restore camera AE / AGC / AWB (see CameraService).
     imageSettingsDefaultsRestored = pyqtSignal()
+    presetRecallRequested = pyqtSignal(int, arguments=["index"])
+    presetSaveRequested = pyqtSignal(int, arguments=["index"])
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -408,10 +410,75 @@ class DentalBridge(QObject):
 
     @pyqtSlot(int)
     def onPresetClicked(self, idx):
-        self.set_active_preset(idx if self._active_preset != idx else -1)
+        if self._active_preset == idx:
+            self.set_active_preset(-1)
+            return
+        self.set_active_preset(idx)
+        self.presetRecallRequested.emit(idx)
 
     @pyqtSlot(int)
-    def onPresetSave(self, idx): self.toast(f"Preset {idx + 1} saved")
+    def onPresetSave(self, idx):
+        self.presetSaveRequested.emit(idx)
+
+    # ── Preset apply helper (called by backend) ───────────────────────────────
+    def apply_preset_snapshot(self, snap: dict) -> None:
+        """Apply a preset snapshot dict onto bridge state and notify QML."""
+        if not isinstance(snap, dict):
+            return
+
+        def _i(key: str, lo: int, hi: int, cur: int, sig) -> int:
+            try:
+                v = int(snap.get(key, cur))
+            except Exception:
+                v = cur
+            v = max(lo, min(hi, v))
+            if v != cur:
+                sig.emit(v)
+            return v
+
+        def _b(key: str, cur: bool, sig) -> bool:
+            v = bool(snap.get(key, cur))
+            if v != cur:
+                sig.emit(v)
+            return v
+
+        # Sliders / basic
+        self._brightness = _i("brightness", 0, 100, self._brightness, self.brightnessChanged)
+        self.set_zoom(_i("zoom", 0, 100, self._zoom, self.zoomChanged))
+
+        # Pan (normalized) — apply only when zoom is active.
+        try:
+            px = float(snap.get("previewPanX", self._pan_x))
+            py = float(snap.get("previewPanY", self._pan_y))
+            px = max(0.0, min(1.0, px))
+            py = max(0.0, min(1.0, py))
+            if self._zoom > 2:
+                if px != self._pan_x:
+                    self._pan_x = px
+                    self.previewPanXChanged.emit(px)
+                if py != self._pan_y:
+                    self._pan_y = py
+                    self.previewPanYChanged.emit(py)
+        except Exception:
+            pass
+
+        # View transforms
+        self._flip_h = _b("flipHorizontal", self._flip_h, self.flipHorizontalChanged)
+        self._flip_v = _b("flipVertical", self._flip_v, self.flipVerticalChanged)
+        self._rotate_q = _i("rotateQuarterTurns", 0, 3, self._rotate_q, self.rotateQuarterTurnsChanged)
+
+        # Image settings (0–100, 50 neutral)
+        self._exposure = _i("exposure", 0, 100, self._exposure, self.exposureChanged)
+        self._gain = _i("gain", 0, 100, self._gain, self.gainChanged)
+        self._white_balance = _i("whiteBalance", 0, 100, self._white_balance, self.whiteBalanceChanged)
+        self._contrast = _i("contrast", 0, 100, self._contrast, self.contrastChanged)
+        self._saturation = _i("saturation", 0, 100, self._saturation, self.saturationChanged)
+        self._warmth = _i("warmth", 0, 100, self._warmth, self.warmthChanged)
+        self._tint = _i("tint", 0, 100, self._tint, self.tintChanged)
+
+        # Capture prefs
+        self._capture_format_png = _b("captureFormatPng", self._capture_format_png, self.captureFormatPngChanged)
+        self._image_quality = _i("imageQuality", 1, 100, self._image_quality, self.imageQualityChanged)
 
     @pyqtSlot(bool)
     def onAutoColorToggled(self, v):

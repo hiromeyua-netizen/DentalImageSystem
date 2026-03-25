@@ -87,6 +87,81 @@ class CameraService(QObject):
             self.on_image_settings_defaults_restored
         )
         self._bridge.captureClicked.connect(self.on_capture_requested)
+        self._bridge.presetSaveRequested.connect(self.on_preset_save_requested)
+        self._bridge.presetRecallRequested.connect(self.on_preset_recall_requested)
+
+        self._presets_path = PROJECT_ROOT / "config" / "presets.json"
+        self._presets: dict[str, dict] = {}
+        self._load_presets()
+
+    # ── Presets (3 slots) ───────────────────────────────────────────────────
+    def _load_presets(self) -> None:
+        self._presets = {}
+        try:
+            if not self._presets_path.is_file():
+                return
+            data = json.loads(self._presets_path.read_text(encoding="utf-8"))
+            presets = data.get("presets", {})
+            if isinstance(presets, dict):
+                for k, v in presets.items():
+                    if str(k) in ("0", "1", "2") and isinstance(v, dict):
+                        self._presets[str(k)] = v
+        except Exception:
+            self._presets = {}
+
+    def _save_presets(self) -> None:
+        try:
+            self._presets_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"version": 1, "presets": self._presets}
+            self._presets_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as exc:
+            self._bridge.toast(f"Could not save presets: {exc}")
+
+    def _preset_snapshot_from_bridge(self) -> dict:
+        return {
+            "brightness": int(self._bridge.brightness),
+            "zoom": int(self._bridge.zoom),
+            "previewPanX": float(self._bridge.previewPanX),
+            "previewPanY": float(self._bridge.previewPanY),
+            "flipHorizontal": bool(self._bridge.flipHorizontal),
+            "flipVertical": bool(self._bridge.flipVertical),
+            "rotateQuarterTurns": int(self._bridge.rotateQuarterTurns) % 4,
+            "exposure": int(self._bridge.exposure),
+            "gain": int(self._bridge.gain),
+            "whiteBalance": int(self._bridge.whiteBalance),
+            "contrast": int(self._bridge.contrast),
+            "saturation": int(self._bridge.saturation),
+            "warmth": int(self._bridge.warmth),
+            "tint": int(self._bridge.tint),
+            "captureFormatPng": bool(self._bridge.captureFormatPng),
+            "imageQuality": int(self._bridge.imageQuality),
+        }
+
+    @pyqtSlot(int)
+    def on_preset_save_requested(self, index: int) -> None:
+        k = str(int(index))
+        if k not in ("0", "1", "2"):
+            return
+        self._presets[k] = self._preset_snapshot_from_bridge()
+        self._save_presets()
+        self._bridge.toast(f"Preset {int(index) + 1} saved")
+
+    @pyqtSlot(int)
+    def on_preset_recall_requested(self, index: int) -> None:
+        k = str(int(index))
+        snap = self._presets.get(k)
+        if not isinstance(snap, dict):
+            self._bridge.toast(f"Preset {int(index) + 1} is empty — long-press to save")
+            return
+
+        try:
+            self._bridge.apply_preset_snapshot(snap)
+        except Exception:
+            return
+
+        # Ensure hardware follows recalled exposure/gain when connected.
+        self._push_exposure_to_camera()
+        self._push_gain_to_camera()
 
     # ── Detection ───────────────────────────────────────────────────────────
     def refresh_detection(self) -> None:
@@ -179,6 +254,14 @@ class CameraService(QObject):
         self._stats_t0 = time.perf_counter()
         self._timer.start()
         self._bridge.toast("Camera connected")
+
+        # Apply any active preset after connecting so hardware settings are pushed.
+        try:
+            ap = int(self._bridge.activePreset)
+            if ap in (0, 1, 2):
+                self.on_preset_recall_requested(ap)
+        except Exception:
+            pass
 
     def _disconnect(self) -> None:
         self._timer.stop()
