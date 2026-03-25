@@ -44,6 +44,13 @@ class DentalBridge(QObject):
     flipHorizontalChanged       = pyqtSignal(bool)
     flipVerticalChanged         = pyqtSignal(bool)
     rotateQuarterTurnsChanged   = pyqtSignal(int)
+    previewPanXChanged          = pyqtSignal(float)
+    previewPanYChanged          = pyqtSignal(float)
+    minimapViewportXChanged     = pyqtSignal(float)
+    minimapViewportYChanged     = pyqtSignal(float)
+    minimapViewportWidthChanged = pyqtSignal(float)
+    minimapViewportHeightChanged = pyqtSignal(float)
+    minimapAspectRatioChanged   = pyqtSignal(float)
 
     # ── Action signals (connect from outside for real behaviour) ──────────────
     toastRequested = pyqtSignal(str, arguments=["message"])
@@ -87,6 +94,14 @@ class DentalBridge(QObject):
         self._flip_h             = False
         self._flip_v             = False
         self._rotate_q           = 0  # 0–3 clockwise quarter turns
+        # Zoom pan: 0–1 along axes (0.5 = centred). Minimap: viewport in full-frame norm coords.
+        self._pan_x              = 0.5
+        self._pan_y              = 0.5
+        self._mv_x               = 0.0
+        self._mv_y               = 0.0
+        self._mv_w               = 1.0
+        self._mv_h               = 1.0
+        self._minimap_ar         = 1080.0 / 1920.0  # height / width
 
     # ── QML-readable properties ───────────────────────────────────────────────
     @pyqtProperty(bool, notify=connectedChanged)
@@ -188,6 +203,27 @@ class DentalBridge(QObject):
     @pyqtProperty(int, notify=rotateQuarterTurnsChanged)
     def rotateQuarterTurns(self): return self._rotate_q
 
+    @pyqtProperty(float, notify=previewPanXChanged)
+    def previewPanX(self): return self._pan_x
+
+    @pyqtProperty(float, notify=previewPanYChanged)
+    def previewPanY(self): return self._pan_y
+
+    @pyqtProperty(float, notify=minimapViewportXChanged)
+    def minimapViewportX(self): return self._mv_x
+
+    @pyqtProperty(float, notify=minimapViewportYChanged)
+    def minimapViewportY(self): return self._mv_y
+
+    @pyqtProperty(float, notify=minimapViewportWidthChanged)
+    def minimapViewportWidth(self): return self._mv_w
+
+    @pyqtProperty(float, notify=minimapViewportHeightChanged)
+    def minimapViewportHeight(self): return self._mv_h
+
+    @pyqtProperty(float, notify=minimapAspectRatioChanged)
+    def minimapAspectRatio(self): return self._minimap_ar
+
     # ── Python-side setters (called by backend) ───────────────────────────────
     def set_connected(self, v):
         if self._connected != v:
@@ -230,9 +266,55 @@ class DentalBridge(QObject):
             self._brightness = v; self.brightnessChanged.emit(v)
 
     def set_zoom(self, v):
-        v = max(0, min(100, v))
-        if self._zoom != v:
-            self._zoom = v; self.zoomChanged.emit(v)
+        v = max(0, min(100, int(v)))
+        if self._zoom == v:
+            return
+        self._zoom = v
+        self.zoomChanged.emit(v)
+        if v <= 2:
+            self._reset_preview_pan()
+
+    def _reset_preview_pan(self) -> None:
+        if self._pan_x != 0.5:
+            self._pan_x = 0.5
+            self.previewPanXChanged.emit(self._pan_x)
+        if self._pan_y != 0.5:
+            self._pan_y = 0.5
+            self.previewPanYChanged.emit(self._pan_y)
+
+    def reset_live_view_navigation(self) -> None:
+        """Disconnected / placeholder — centre pan and full-frame minimap rect."""
+        self._reset_preview_pan()
+        self._set_minimap_viewport_rect(0.0, 0.0, 1.0, 1.0)
+        self._minimap_ar = 1080.0 / 1920.0
+        self.minimapAspectRatioChanged.emit(self._minimap_ar)
+
+    def _set_minimap_viewport_rect(self, vx: float, vy: float, vw: float, vh: float) -> None:
+        vx, vy = max(0.0, min(1.0, float(vx))), max(0.0, min(1.0, float(vy)))
+        vw, vh = max(0.0, min(1.0, float(vw))), max(0.0, min(1.0, float(vh)))
+        if self._mv_x != vx:
+            self._mv_x = vx
+            self.minimapViewportXChanged.emit(vx)
+        if self._mv_y != vy:
+            self._mv_y = vy
+            self.minimapViewportYChanged.emit(vy)
+        if self._mv_w != vw:
+            self._mv_w = vw
+            self.minimapViewportWidthChanged.emit(vw)
+        if self._mv_h != vh:
+            self._mv_h = vh
+            self.minimapViewportHeightChanged.emit(vh)
+
+    def update_minimap_from_crop(
+        self, x0: int, y0: int, cw: int, ch: int, fw: int, fh: int
+    ) -> None:
+        if fw <= 0 or fh <= 0:
+            return
+        self._minimap_ar = float(fh) / float(fw)
+        self.minimapAspectRatioChanged.emit(self._minimap_ar)
+        self._set_minimap_viewport_rect(
+            x0 / float(fw), y0 / float(fh), cw / float(fw), ch / float(fh)
+        )
 
     def set_active_preset(self, idx):
         if self._active_preset != idx:
@@ -282,6 +364,28 @@ class DentalBridge(QObject):
 
     @pyqtSlot(int)
     def onZoomChanged(self, v): self.set_zoom(v)
+
+    @pyqtSlot(float, float, float, float)
+    def applyPreviewPanDelta(self, dx, dy, view_w, view_h):
+        """Drag on preview while zoomed: move crop (phone-style)."""
+        if self._zoom <= 2 or view_w <= 1.0 or view_h <= 1.0:
+            return
+        k = 1.65
+        nx = self._pan_x - (float(dx) / float(view_w)) * k
+        ny = self._pan_y - (float(dy) / float(view_h)) * k
+        nx = max(0.0, min(1.0, nx))
+        ny = max(0.0, min(1.0, ny))
+        if nx != self._pan_x:
+            self._pan_x = nx
+            self.previewPanXChanged.emit(nx)
+        if ny != self._pan_y:
+            self._pan_y = ny
+            self.previewPanYChanged.emit(ny)
+
+    @pyqtSlot()
+    def resetPreviewPan(self):
+        """Re-centre the zoomed crop (double-tap / shortcut)."""
+        self._reset_preview_pan()
 
     @pyqtSlot(int)
     def onPresetClicked(self, idx):

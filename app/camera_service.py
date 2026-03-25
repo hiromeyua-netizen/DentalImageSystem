@@ -15,7 +15,7 @@ from typing import Any, List, Optional
 import numpy as np
 from PyQt6.QtCore import QObject, QTimer, pyqtSlot
 
-from view_transforms import apply_view_transforms, zoom_crop
+from view_transforms import apply_view_transforms, zoom_crop_pan
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -155,6 +155,7 @@ class CameraService(QObject):
         self._bridge.set_connected(False)
         self._bridge.set_capturable(False)
         self._bridge.clear_stream_stats()
+        self._bridge.reset_live_view_navigation()
         self._bridge.push_frame(self._provider)
         self._bridge.toast("Camera disconnected")
 
@@ -167,11 +168,18 @@ class CameraService(QObject):
             frame = None
         if frame is None or frame.size == 0:
             return
-        out = zoom_crop(frame, self._bridge.zoom)
-        if out is None or out.size == 0:
+        self._provider.update_overview(frame)
+        cropped, x0, y0, cw, ch, fw, fh = zoom_crop_pan(
+            frame,
+            self._bridge.zoom,
+            self._bridge.previewPanX,
+            self._bridge.previewPanY,
+        )
+        self._bridge.update_minimap_from_crop(x0, y0, cw, ch, fw, fh)
+        if cropped is None or cropped.size == 0:
             return
         out = apply_view_transforms(
-            out,
+            cropped,
             flip_h=self._bridge.flipHorizontal,
             flip_v=self._bridge.flipVertical,
             rotate_q=self._bridge.rotateQuarterTurns,

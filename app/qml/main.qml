@@ -32,25 +32,106 @@ ApplicationWindow {
         return Math.max(240, Math.min(cap, overlapMax))
     }
 
-    // ── Camera / placeholder image ─────────────────────────────────────────
-    Image {
-        id: camera
+    Item {
+        id: cameraArea
         anchors.fill: parent
-        source:       "image://camera/frame?" + bridge.frameCounter
-        fillMode:     Image.PreserveAspectCrop
-        cache:        false
-        smooth:       true
-        asynchronous: false
+        z: 0
 
-        Rectangle {
+        Image {
+            id: camera
             anchors.fill: parent
-            color:        "#0d0f14"
-            visible:      camera.status !== Image.Ready
-            Text {
-                anchors.centerIn: parent
-                text:  "Waiting for camera…"
-                color: "#404055"
-                font.pixelSize: win.uiCompact ? 15 : 18
+            source:       "image://camera/frame?" + bridge.frameCounter
+            fillMode:     Image.PreserveAspectCrop
+            cache:        false
+            smooth:       true
+            asynchronous: false
+
+            Rectangle {
+                anchors.fill: parent
+                color:        "#0d0f14"
+                visible:      camera.status !== Image.Ready
+                Text {
+                    anchors.centerIn: parent
+                    text:  "Waiting for camera…"
+                    color: "#404055"
+                    font.pixelSize: win.uiCompact ? 15 : 18
+                }
+            }
+        }
+
+        // Drag to pan when zoomed (phone-style)
+        MouseArea {
+            id: panArea
+            z: 1
+            anchors.fill: parent
+            enabled: bridge.connected && bridge.zoom > 2
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            cursorShape: !enabled ? Qt.ArrowCursor
+                : (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
+
+            property real ldx: 0
+            property real ldy: 0
+
+            onPressed: function (mouse) {
+                ldx = mouse.x
+                ldy = mouse.y
+            }
+            onPositionChanged: function (mouse) {
+                if (!pressed)
+                    return
+                var dx = mouse.x - ldx
+                var dy = mouse.y - ldy
+                ldx = mouse.x
+                ldy = mouse.y
+                bridge.applyPreviewPanDelta(dx, dy, width, height)
+            }
+            onDoubleClicked: function (/*mouse*/) {
+                bridge.resetPreviewPan()
+            }
+        }
+
+        // Minimap: full-frame thumb + viewport rectangle
+        Rectangle {
+            id: minimapChrome
+            z: 4
+            visible: bridge.connected && bridge.zoom > 2
+            anchors.left: parent.left
+            anchors.bottom: bottomBar.top
+            anchors.leftMargin: Math.max(12, win.marginH)
+            anchors.bottomMargin: Math.max(10, win.marginV)
+            width: win.uiNarrow ? 96 : 128
+            height: Math.max(40, Math.round(width * Math.max(0.2, bridge.minimapAspectRatio)))
+            radius: 10
+            color: Qt.rgba(0, 0, 0, 0.5)
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.35)
+            clip: true
+
+            Item {
+                id: miniInner
+                anchors.fill: parent
+                anchors.margins: 3
+                clip: true
+
+                Image {
+                    anchors.fill: parent
+                    fillMode: Image.Stretch
+                    source: "image://camera/overview?" + bridge.frameCounter
+                    asynchronous: false
+                    smooth: true
+                }
+
+                Rectangle {
+                    x: parent.width * bridge.minimapViewportX
+                    y: parent.height * bridge.minimapViewportY
+                    width: parent.width * bridge.minimapViewportWidth
+                    height: parent.height * bridge.minimapViewportHeight
+                    color: "transparent"
+                    border.width: 1.5
+                    border.color: Qt.rgba(1, 1, 1, 0.92)
+                    radius: 2
+                }
             }
         }
     }

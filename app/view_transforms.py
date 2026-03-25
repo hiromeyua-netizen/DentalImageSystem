@@ -1,30 +1,46 @@
-"""Preview pipeline helpers. Order matches ``MainWindow._apply_view_transforms``: zoom crop, then flip/rotate."""
+"""Preview pipeline: zoom+pan crop, then flip/rotate. Pan uses 0–1 along free axis (0=left/top … 1=right/bottom)."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 import numpy as np
 
 
-def zoom_crop(bgr: Optional[np.ndarray], pct: int) -> Optional[np.ndarray]:
+def zoom_crop_pan(
+    bgr: Optional[np.ndarray],
+    pct: int,
+    pan_x: float,
+    pan_y: float,
+) -> Tuple[Optional[np.ndarray], int, int, int, int, int, int]:
     """
-    Centre crop then (implicitly via display) scale up — ``pct`` is 0–100 “zoom level”
-    like the bottom bar (higher = tighter crop / more “magnified”).
+    Crop window for zoom with pannable origin.
+
+    Returns ``(cropped_bgr|None, x0, y0, cw, ch, fw, fh)`` in source pixel coords.
+    When ``pct <= 2``, returns the full frame and (0,0,fw,fh,fw,fh).
+    ``pan_x`` / ``pan_y`` in [0,1]: 0.5 = centred; 0 = crop hugging left / top edge.
     """
     if bgr is None or bgr.size == 0:
-        return bgr
-    if pct <= 2:
-        return bgr
+        return None, 0, 0, 0, 0, 0, 0
     fh, fw = bgr.shape[:2]
+    if pct <= 2:
+        return bgr, 0, 0, fw, fh, fw, fh
+
     t = pct / 100.0
     cw = max(32, int(fw * (1.0 - 0.7 * t)))
     ch = max(32, int(fh * (1.0 - 0.7 * t)))
     cw = min(cw, fw)
     ch = min(ch, fh)
-    x0 = (fw - cw) // 2
-    y0 = (fh - ch) // 2
-    return bgr[y0 : y0 + ch, x0 : x0 + cw].copy()
+    max_x0 = max(0, fw - cw)
+    max_y0 = max(0, fh - ch)
+
+    px = max(0.0, min(1.0, float(pan_x)))
+    py = max(0.0, min(1.0, float(pan_y)))
+    x0 = int(round(px * max_x0)) if max_x0 > 0 else 0
+    y0 = int(round(py * max_y0)) if max_y0 > 0 else 0
+
+    cropped = bgr[y0 : y0 + ch, x0 : x0 + cw].copy()
+    return cropped, x0, y0, cw, ch, fw, fh
 
 
 def apply_view_transforms(
