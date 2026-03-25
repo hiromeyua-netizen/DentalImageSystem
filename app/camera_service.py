@@ -45,6 +45,14 @@ except Exception:  # pragma: no cover
     apply_software_image_adjustments = None  # type: ignore[assignment,misc]
     _HAS_COLOR_ADJ = False
 
+try:
+    from dental_imaging.storage.snapshot_writer import SnapshotWriter
+
+    _HAS_SNAPSHOT_WRITER = True
+except Exception:  # pragma: no cover
+    SnapshotWriter = None  # type: ignore[assignment,misc]
+    _HAS_SNAPSHOT_WRITER = False
+
 # Same mapping as dental_imaging ImageSettingsHardwareRange defaults.
 EXPOSURE_US_MIN = 1000
 EXPOSURE_US_MAX = 200_000
@@ -63,15 +71,22 @@ class CameraService(QObject):
         self._provider = provider
         self._camera: Any = None
         self._detected: List[Any] = []
+        self._capture_in_progress = False
         self._timer = QTimer(self)
         self._timer.setInterval(max(16, int(round(1000 / TARGET_FPS))))
         self._timer.timeout.connect(self._on_frame_tick)
         self._stats_t0 = time.perf_counter()
+        self._snapshot_writer = (
+            SnapshotWriter(PROJECT_ROOT / "captures", "png", jpeg_quality=94)
+            if _HAS_SNAPSHOT_WRITER and SnapshotWriter is not None
+            else None
+        )
         self._bridge.exposureChanged.connect(self._on_bridge_exposure_changed)
         self._bridge.gainChanged.connect(self._on_bridge_gain_changed)
         self._bridge.imageSettingsDefaultsRestored.connect(
             self.on_image_settings_defaults_restored
         )
+        self._bridge.captureClicked.connect(self.on_capture_requested)
 
     # ── Detection ───────────────────────────────────────────────────────────
     def refresh_detection(self) -> None:
@@ -297,3 +312,52 @@ class CameraService(QObject):
         fps = float(TARGET_FPS)
         mbps = (w * h * 3.0 * fps) / (1024.0 * 1024.0)
         self._bridge.set_stats(w, h, fps, mbps)
+
+    @pyqtSlot()
+    def on_capture_requested(self) -> None:
+        """Capture current view, apply active image settings, and save to disk."""
+        if self._capture_in_progress:
+            return
+        if self._camera is None or not getattr(self._camera, "is_connected", False):
+            self._bridge.toast("Camera is not connected.")
+            return
+        if self._snapshot_writer is None:
+            self._bridge.toast("Capture storage is unavailable in this build.")
+            return
+
+        self._capture_in_progress = True
+        try:
+            frame = self._camera.grab_still_frame()
+            if frame is None or frame.size == 0:
+                self._bridge.toast("Capture failed. Please try again.")
+                return
+
+            frame = self._apply_software_image_adjustments(frame)
+            cropped, *_ = zoom_crop_pan(
+                frame,
+                self._bridge.zoom,
+                self._bridge.previewPanX,
+                self._bridge.previewPanY,
+            )
+            if cropped is None or cropped.size == 0:
+                self._bridge.toast("Capture failed. Please try again.")
+                return
+            out = apply_view_transforms(
+                cropped,
+                flip_h=self._bridge.flipHorizontal,
+                flip_v=self._bridge.flipVertical,
+                rotate_q=self._bridge.rotateQuarterTurns,
+            )
+            if out is None or out.size == 0:
+                self._bridge.toast("Capture failed. Please try again.")
+                return
+
+            fmt = "png" if bool(self._bridge.captureFormatPng) else "jpg"
+            self._snapshot_writer.set_image_format(fmt)
+            self._snapshot_writer.set_jpeg_quality(int(self._bridge.imageQuality))
+            result = self._snapshot_writer.save_bgr(out, prefix="capture")
+            self._bridge.toast(f"Saved: {result.path.name}")
+        except Exception as exc:
+            self._bridge.toast(f"Capture failed: {exc}")
+        finally:
+            self._capture_in_progress = False

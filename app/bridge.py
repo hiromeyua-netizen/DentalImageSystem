@@ -345,7 +345,6 @@ class DentalBridge(QObject):
             self.toast("Connect the camera to capture")
             return
         self.captureClicked.emit()
-        self.toast("Image captured")
 
     @pyqtSlot(bool)
     def onImageSettingsToggled(self, v):
