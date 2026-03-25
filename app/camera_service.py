@@ -156,7 +156,7 @@ class CameraService(QObject):
         if frame is None or frame.size == 0:
             return
         self._provider.update_frame(frame)
-        self._bridge.push_frame_refresh()
+        self._bridge.push_frame(self._provider)
         self._frame_accum += 1
         now = time.perf_counter()
         dt = now - self._fps_t0
