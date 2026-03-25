@@ -74,18 +74,22 @@ Item {
                 }
             }
 
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onPressed: (e) => _upd(e.x)
-                onPositionChanged: (e) => { if (pressed) _upd(e.x) }
-            }
-
+            // Arrow handlers do not see sibling `function _upd` — call `track._upd` explicitly.
             function _upd(mx) {
                 var f = Math.max(0, Math.min(1, (mx - track._m) / Math.max(1, track._tw)))
                 var v = Math.round(f * 100)
                 if (v !== row.value)
                     row.moved(v)
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onPressed: function (e) { track._upd(e.x) }
+                onPositionChanged: function (e) {
+                    if (pressed)
+                        track._upd(e.x)
+                }
             }
         }
     }
