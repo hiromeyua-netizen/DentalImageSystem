@@ -1,38 +1,36 @@
 import QtQuick
 
-// Floating toast notification that fades in/out
+// Animated toast notification that auto-hides after 2.5 s.
 Rectangle {
     id: root
-    width: toastText.implicitWidth + 40
-    height: toastText.implicitHeight + 20
-    radius: height / 2
-    color: Qt.rgba(0.08, 0.09, 0.11, 0.88)
-    border.color: Qt.rgba(1, 1, 1, 0.22)
+    visible:  false
+    opacity:  0
+    radius:   10
+    color:    Qt.rgba(0.10, 0.11, 0.14, 0.94)
     border.width: 1
-    opacity: 0
-    visible: opacity > 0
+    border.color: Qt.rgba(1, 1, 1, 0.18)
+    height:   42
+    width:    msg.implicitWidth + 40
 
     Text {
-        id: toastText
+        id:              msg
         anchors.centerIn: parent
-        text: ""
-        color: "#f0f0f8"
-        font.pixelSize: 14
-        font.family: "Segoe UI, Arial"
+        font.pixelSize:  13
+        color:           "#f0f0f4"
     }
 
-    // Fade in then out
+    // Appear animation
     SequentialAnimation {
-        id: seq
-        NumberAnimation { target: root; property: "opacity"; to: 1.0; duration: 180; easing.type: Easing.OutQuad }
-        PauseAnimation  { id: holdPause; duration: 2400 }
-        NumberAnimation { target: root; property: "opacity"; to: 0.0; duration: 350; easing.type: Easing.InQuad }
+        id: showAnim
+        NumberAnimation { target: root; property: "opacity"; to: 1.0; duration: 200 }
+        PauseAnimation  { duration: 2200 }
+        NumberAnimation { target: root; property: "opacity"; to: 0.0; duration: 300 }
+        ScriptAction    { script: root.visible = false }
     }
 
-    function show(message, durationMs) {
-        seq.stop()
-        toastText.text = message
-        holdPause.duration = Math.max(800, (durationMs || 2800) - 530)
-        seq.start()
+    function show(text) {
+        msg.text = text
+        visible  = true
+        showAnim.restart()
     }
 }

@@ -323,21 +323,6 @@ class ImageSettingsComponent(QFrame):
             if block_signals:
                 s.blockSignals(False)
 
-    def set_slider_value(self, key: str, v: int, *, block_signals: bool = True) -> None:
-        """Set a single slider by key name without emitting settings_changed."""
-        if key not in self._sliders:
-            return
-        v = max(0, min(100, int(v)))
-        s = self._sliders[key]
-        if block_signals:
-            s.blockSignals(True)
-        try:
-            s.setValue(v)
-            self._labels[key].setText(f"{v}%")
-        finally:
-            if block_signals:
-                s.blockSignals(False)
-
     def set_panel_visible(self, visible: bool) -> None:
         self.setVisible(visible)
 

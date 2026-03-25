@@ -1,132 +1,151 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
-Item {
+// Top chrome strip: logo | stats | CONNECTED pill | power button
+Rectangle {
     id: root
+    color: Qt.rgba(0.08, 0.09, 0.11, 0.72)
 
-    // ── API ───────────────────────────────────────────────────────────────
-    property color  chromeBg
-    property color  chromeBorder
-    property string brandTitle: "DENTAL IMAGING"
-    property string statsText:  "— X —     — fps     — MB/s"
-    property bool   connected:  false
-
-    signal powerClicked()
-
-    // ── Background ────────────────────────────────────────────────────────
+    // Subtle bottom border
     Rectangle {
-        anchors.fill: parent
-        color: root.chromeBg
-        border.color: root.chromeBorder
-        border.width: 1
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        height: 1
+        color:  Qt.rgba(1, 1, 1, 0.09)
+    }
 
-        RowLayout {
-            anchors { fill: parent; leftMargin: 20; rightMargin: 16; topMargin: 0; bottomMargin: 0 }
-            spacing: 16
+    RowLayout {
+        anchors { fill: parent; leftMargin: 18; rightMargin: 18 }
+        spacing: 20
 
-            // ── Brand ─────────────────────────────────────────────────────
-            Column {
-                spacing: 1
-                Layout.alignment: Qt.AlignVCenter
-
-                Text {
-                    text: {
-                        var parts = root.brandTitle.split(" — ")
-                        return parts[0].toUpperCase()
-                    }
-                    color: "#ffffff"
-                    font.pixelSize: Math.max(13, root.height * 0.28)
-                    font.weight: Font.Bold
-                    font.letterSpacing: 0.8
-                    font.family: "Segoe UI, Arial"
-                }
-                Text {
-                    visible: root.brandTitle.indexOf(" — ") !== -1
-                    text: {
-                        var parts = root.brandTitle.split(" — ")
-                        return parts.length > 1 ? parts[1].toUpperCase() : ""
-                    }
-                    color: "#888898"
-                    font.pixelSize: Math.max(8, root.height * 0.14)
-                    font.letterSpacing: 0.4
-                    font.family: "Segoe UI, Arial"
-                }
-            }
-
-            // ── Stretch ───────────────────────────────────────────────────
-            Item { Layout.fillWidth: true }
-
-            // ── Stream stats ──────────────────────────────────────────────
+        // ── Logo ──────────────────────────────────────────────────────────
+        Column {
+            spacing: 2
+            Layout.alignment: Qt.AlignVCenter
             Text {
-                text: root.statsText
-                color: "#dddde8"
-                font.pixelSize: Math.max(11, root.height * 0.22)
-                font.family: "Consolas, Segoe UI, monospace"
-                font.letterSpacing: 0.3
-                Layout.alignment: Qt.AlignVCenter
+                text:           bridge.statsText.length > 0 ? appName.split("\n")[0] : appName
+                font.pixelSize: 14
+                font.bold:      true
+                font.letterSpacing: 0.8
+                color:          "#ffffff"
+                property string appName: bridge.statsText.length >= 0 ? _appName : _appName
             }
-
-            // ── CONNECTED pill ────────────────────────────────────────────
-            Rectangle {
-                id: connPill
-                width:  connText.implicitWidth + 32
-                height: Math.max(28, root.height * 0.50)
-                radius: height / 2
-                color:  root.connected ? Qt.rgba(1,1,1,0.17) : Qt.rgba(1,1,1,0.08)
-                border.color: root.connected ? Qt.rgba(1,1,1,0.55) : Qt.rgba(1,1,1,0.25)
-                border.width: 1
-                Layout.alignment: Qt.AlignVCenter
-
-                Behavior on color        { ColorAnimation { duration: 250 } }
-                Behavior on border.color { ColorAnimation { duration: 250 } }
-
-                Text {
-                    id: connText
-                    anchors.centerIn: parent
-                    text: root.connected ? "CONNECTED" : "DISCONNECTED"
-                    color: root.connected ? "#ffffff" : "#b0b0be"
-                    font.pixelSize: Math.max(10, root.height * 0.19)
-                    font.weight: Font.Bold
-                    font.letterSpacing: 0.6
-                    font.family: "Segoe UI, Arial"
-
-                    Behavior on color { ColorAnimation { duration: 250 } }
-                }
-            }
-
-            // ── Power button (white circle) ────────────────────────────────
-            Rectangle {
-                id: powerBtn
-                width:  Math.max(38, root.height * 0.70)
-                height: width
-                radius: width / 2
-                color:  powerMa.pressed ? "#d4d4dc" : (powerMa.containsMouse ? "#ffffff" : "#eeeeF2")
-                Layout.alignment: Qt.AlignVCenter
-
-                Behavior on color { ColorAnimation { duration: 120 } }
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "\u23FB"   // ⏻
-                    color: "#1a1a22"
-                    font.pixelSize: Math.max(16, parent.height * 0.48)
-                    font.weight: Font.Bold
-                    font.family: "Segoe UI Symbol, Segoe UI"
-                }
-
-                MouseArea {
-                    id: powerMa
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.powerClicked()
-                }
-
-                ToolTip.visible: powerMa.containsMouse
-                ToolTip.text: root.connected ? "Disconnect camera" : "Connect camera"
-                ToolTip.delay: 600
+            Text {
+                text:           _appSubName
+                font.pixelSize: 9
+                font.letterSpacing: 0.5
+                color:          "#9090a0"
             }
         }
+
+        // invisible: expose brand via context properties set from Python
+        property string _appName:    typeof appName    !== "undefined" ? appName    : "DENTAL IMAGING"
+        property string _appSubName: typeof appSubName !== "undefined" ? appSubName : "SYSTEM"
+
+        Item { Layout.fillWidth: true }
+
+        // ── Stream stats ──────────────────────────────────────────────────
+        Text {
+            id: statsLabel
+            text:               bridge.statsText
+            font.pixelSize:     13
+            font.weight:        Font.Medium
+            font.letterSpacing: 0.4
+            color:              "#e4e4e4"
+            Layout.alignment:   Qt.AlignVCenter
+        }
+
+        // ── CONNECTED pill ────────────────────────────────────────────────
+        Rectangle {
+            id: connPill
+            width:  pillText.implicitWidth + 28
+            height: 32
+            radius: 16
+            color: bridge.connected
+                ? Qt.rgba(1, 1, 1, 0.18)
+                : Qt.rgba(1, 1, 1, 0.10)
+            border.width: 1
+            border.color: bridge.connected
+                ? Qt.rgba(1, 1, 1, 0.55)
+                : Qt.rgba(1, 1, 1, 0.25)
+            Layout.alignment: Qt.AlignVCenter
+
+            Behavior on color        { ColorAnimation { duration: 250 } }
+            Behavior on border.color { ColorAnimation { duration: 250 } }
+
+            Text {
+                id:              pillText
+                anchors.centerIn: parent
+                text:            bridge.connected ? "CONNECTED" : "DISCONNECTED"
+                font.pixelSize:  11
+                font.bold:       true
+                font.letterSpacing: 0.6
+                color:           bridge.connected ? "#ffffff" : "#c0c0c8"
+                Behavior on color { ColorAnimation { duration: 250 } }
+            }
+        }
+
+        // ── Power button ──────────────────────────────────────────────────
+        Rectangle {
+            id:     powerBtn
+            width:  44
+            height: 44
+            radius: 22
+            color:  powerMa.pressed ? "#d8d8e0"
+                  : powerMa.containsMouse ? "#ffffff" : Qt.rgba(1,1,1,0.92)
+            Layout.alignment: Qt.AlignVCenter
+
+            Behavior on color { ColorAnimation { duration: 100 } }
+
+            Image {
+                anchors.centerIn: parent
+                source:           Qt.resolvedUrl("icons/power.svg")
+                sourceSize:       Qt.size(22, 22)
+                fillMode:         Image.PreserveAspectFit
+                // SVG stroke colour via colour overlay
+                layer.enabled: true
+                layer.effect: null
+            }
+
+            // Colourize the white SVG to dark for the light button
+            ColorOverlayShim {
+                anchors.fill: parent
+                svgSource:    Qt.resolvedUrl("icons/power.svg")
+                tintColor:    "#18181c"
+            }
+
+            MouseArea {
+                id:              powerMa
+                anchors.fill:    parent
+                hoverEnabled:    true
+                cursorShape:     Qt.PointingHandCursor
+                onClicked:       bridge.onPowerClicked()
+            }
+
+            scale: powerMa.pressed ? 0.90 : 1.0
+            Behavior on scale { NumberAnimation { duration: 80 } }
+        }
+    }
+}
+
+// Inline helper to render SVG with a solid tint (avoids needing MultiEffect)
+component ColorOverlayShim: Item {
+    property url   svgSource
+    property color tintColor: "white"
+
+    Image {
+        anchors.fill: parent
+        source:       svgSource
+        sourceSize:   Qt.size(parent.width, parent.height)
+        fillMode:     Image.PreserveAspectFit
+        visible:      false
+        id:           _src
+    }
+    // Simple rectangle mask: only works cleanly on solid/semi transparent bgs
+    // For the white power circle this is fine.
+    Image {
+        anchors.fill:  parent
+        source:        svgSource
+        sourceSize:    Qt.size(parent.width, parent.height)
+        fillMode:      Image.PreserveAspectFit
     }
 }
