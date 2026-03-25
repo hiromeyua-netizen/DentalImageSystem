@@ -64,6 +64,13 @@ ApplicationWindow {
             }
         }
 
+        PreviewOverlays {
+            z: 0.8
+            showOverlay: bridge.connected
+            showGrid: bridge.showGridOverlay
+            showCrosshair: bridge.showCrosshair
+        }
+
         // Drag to pan when zoomed (phone-style)
         MouseArea {
             id: panArea
