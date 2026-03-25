@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
-    QVBoxLayout,
     QStatusBar,
     QMessageBox,
     QSlider,
@@ -21,8 +20,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QDesktopServices
-from dental_imaging.ui.clinical_shell import ClinicalViewport
-from dental_imaging.ui.clinical_settings_panel import ClinicalSettingsPanel
+from PyQt6.QtQuickWidgets import QQuickWidget
+from dental_imaging.ui.qml_bridge import CameraFrameProvider, DentalBridge
 from dental_imaging.ui.widgets.preview_widget import PreviewWidget
 from dental_imaging.hardware.camera import BaslerCamera
 from dental_imaging.models.camera_config import CameraConfig
@@ -99,6 +98,10 @@ class MainWindow(QMainWindow):
         self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)  # B, G, R
         self._presets = [None, None, None]
         self._active_preset_index: Optional[int] = None
+        # QML view state (owned here, synced to bridge)
+        self._brightness: int = 50
+        self._zoom: int = 0
+        self._current_frame: Optional[np.ndarray] = None
 
         self._hidden_tuning = QWidget()
         self.frame_rate_spinbox = QDoubleSpinBox(self._hidden_tuning)
@@ -120,15 +123,24 @@ class MainWindow(QMainWindow):
         self._setup_timers()
         
     def _setup_ui(self) -> None:
-        """Kiosk-style layout: full-screen live view + top / right / bottom chrome."""
+        """QML-based full-screen live view with Python bridge for all logic."""
         self.setWindowTitle(f"{self._app_settings.application.name} — Camera")
         self.setMinimumSize(1280, 720)
 
-        brand = self._app_settings.application.name.upper().replace(" ", "\n", 1)
-        if "\n" not in brand:
-            brand = self._app_settings.application.name.upper()
+        app_name = self._app_settings.application.name
+        # Format as "BRAND — SUBTITLE" so QML TopBar can split on " — "
+        name_parts = app_name.split(" ", 1)
+        brand = (
+            f"{name_parts[0].upper()} — {name_parts[1].upper()}"
+            if len(name_parts) > 1
+            else app_name.upper()
+        )
 
+        # Hidden preview_widget: still used as current_frame store + ROI logic
         self.preview_widget = PreviewWidget()
+        self.preview_widget.hide()
+
+        # image_settings stays as Python model (apply_postprocess, get/set values)
         self.image_settings.settings_changed.connect(
             self._on_image_settings_hardware_push
         )
@@ -142,55 +154,36 @@ class MainWindow(QMainWindow):
             self._on_gain_slider_manual
         )
 
-        self._settings_panel = ClinicalSettingsPanel(
-            self._app_settings.application.name,
-            f"v{self._app_settings.application.version}",
-        )
-        self._clinical = ClinicalViewport(
-            self.preview_widget,
-            self.image_settings,
-            brand_title=brand,
-            settings_panel=self._settings_panel,
-        )
-        self.setCentralWidget(self._clinical)
-
         self.frame_rate_spinbox.valueChanged.connect(self.on_frame_rate_changed)
         self.gamma_slider.valueChanged.connect(self.on_gamma_changed)
         self.gamma_spinbox.valueChanged.connect(self.on_gamma_spinbox_changed)
 
-        rail = self._clinical.right_rail()
-        self.image_settings.wire_toggle_button(rail.image_settings_button())
-        rail.image_settings_button().toggled.connect(self._on_image_settings_toggled)
-        rail.capture_clicked.connect(self.capture_image)
-        rail.settings_toggled.connect(self._on_settings_toggled)
-        self._clinical.top_bar().power_clicked.connect(self._on_power_clicked)
+        # ── QML bridge + frame provider ────────────────────────────────────
+        self._frame_provider = CameraFrameProvider()
+        self._bridge = DentalBridge(self, brand)
 
-        self._wire_settings_panel()
+        # Use the "Basic" style to avoid missing platform DLL dependencies.
+        # Must be set before the first QML engine is created.
+        import os
+        os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 
-        rail.flip_horizontal_clicked.connect(self._toggle_flip_h)
-        rail.flip_vertical_clicked.connect(self._toggle_flip_v)
-        rail.rotate_ccw_clicked.connect(self._rotate_ccw)
-        rail.rotate_cw_clicked.connect(self._rotate_cw)
-        rail.auto_color_toggled.connect(self._on_auto_color_toggled)
-        rail.recenter_roi_clicked.connect(self._stub_recenter_roi)
-        rail.roi_mode_toggled.connect(self._stub_roi_mode)
-
-        bb = self._clinical.bottom_bar()
-        bb.brightness_changed.connect(lambda _v: self._refresh_preview_if_idle())
-        bb.zoom_changed.connect(lambda _v: self._refresh_preview_if_idle())
-        bb.preset_clicked.connect(self._on_preset_clicked)
-        bb.preset_save_requested.connect(self._on_preset_save_requested)
+        # ── QML view ───────────────────────────────────────────────────────
+        self._qml_widget = QQuickWidget(self)
+        self._qml_widget.engine().addImageProvider("camera", self._frame_provider)
+        self._qml_widget.rootContext().setContextProperty("bridge", self._bridge)
+        self._qml_widget.setResizeMode(QQuickWidget.ResizeMode.SizeRootObjectToView)
+        self._qml_widget.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
+        qml_file = Path(__file__).parent / "qml" / "main.qml"
+        self._qml_widget.setSource(QUrl.fromLocalFile(str(qml_file)))
+        self.setCentralWidget(self._qml_widget)
 
         self._load_presets()
-
         self._sync_top_chrome()
 
-        self._toast: Optional[QLabel] = None
-        self._toast_timer: Optional[QTimer] = None
-
         self._updating_settings = False
+        self._bridge.push_status("Ready")
         self.statusBar().showMessage("Ready")
-        
+
     def _setup_timers(self) -> None:
         """Set up timers for preview updates."""
         self.preview_timer = QTimer()
@@ -198,67 +191,16 @@ class MainWindow(QMainWindow):
         fps = max(1.0, float(self._app_settings.preview.fps))
         self.preview_timer.setInterval(max(1, int(round(1000.0 / fps))))
 
-    def _wire_settings_panel(self) -> None:
-        sp = self._settings_panel
+    # Settings panel is now fully handled by QML / DentalBridge.
+    # These legacy helpers are retained as no-ops so subclasses / tests keep working.
 
-        sp.close_requested.connect(self._close_settings_panel)
-        sp.show_grid_changed.connect(self._on_show_grid_changed)
-        sp.show_crosshair_changed.connect(self._on_show_crosshair_changed)
-        sp.auto_scale_preview_changed.connect(self._on_auto_scale_preview_changed)
-        sp.export_scope_changed.connect(self._on_export_scope_changed)
-        sp.capture_format_changed.connect(self._on_capture_format_changed)
-        sp.jpeg_quality_changed.connect(self._on_jpeg_quality_changed)
-        sp.capture_mode_changed.connect(self._on_capture_mode_changed)
-        sp.burst_delay_sec_changed.connect(self._on_burst_delay_changed)
-        sp.camera_sound_changed.connect(self._on_camera_sound_changed)
-        sp.storage_target_changed.connect(self._on_storage_target_changed)
-        sp.sd_card_requested.connect(self._on_sd_card_stub)
-
-    def _on_settings_toggled(self, open_: bool) -> None:
-        rail = self._clinical.right_rail()
-        if open_:
-            # Avoid overlay stacking artifacts: Settings and Image Settings should not be open together.
-            img_btn = rail.image_settings_button()
-            if img_btn.isChecked():
-                img_btn.setChecked(False)
-            self.image_settings.hide()
-            self._sync_settings_panel_from_state()
-            self._settings_panel.show()
-        else:
-            self._settings_panel.hide()
-            if rail.image_settings_button().isChecked():
-                self.image_settings.show()
-        self._clinical.layout_chrome()
-
-    def _on_image_settings_toggled(self, open_: bool) -> None:
-        """Keep Settings and Image Settings mutually exclusive."""
-        if not open_:
-            return
-        settings_btn = self._clinical.right_rail().settings_tool_button()
-        if settings_btn.isChecked():
-            settings_btn.setChecked(False)
-        self._settings_panel.hide()
-        self._clinical.layout_chrome()
-
-    def _close_settings_panel(self) -> None:
-        self._settings_panel.hide()
-        self._clinical.right_rail().settings_tool_button().setChecked(False)
-        self._clinical.layout_chrome()
-
-    def _sync_settings_panel_from_state(self) -> None:
-        fmt = self._snapshot_writer.image_format
-        self._settings_panel.sync_from_main_window(
-            show_grid=self._show_preview_grid,
-            show_crosshair=self._show_preview_crosshair,
-            auto_scale=self._preview_auto_scale,
-            export_full_resolution=self._export_full_resolution,
-            image_format=fmt,
-            jpeg_quality=self._snapshot_writer.jpeg_quality,
-            capture_mode_burst=self._burst_capture_mode,
-            burst_delay_sec=self._burst_delay_sec,
-            camera_sound=self._camera_sound_enabled,
-            storage_sd_selected=self._storage_sd_selected,
+    def _on_sd_card_stub(self) -> None:
+        QMessageBox.information(
+            self,
+            "Storage",
+            "SD card storage is not available on this system.",
         )
+        self._storage_sd_selected = False
 
     def _on_show_grid_changed(self, on: bool) -> None:
         self._show_preview_grid = on
@@ -276,8 +218,11 @@ class MainWindow(QMainWindow):
         self._redraw_preview_if_possible()
 
     def _redraw_preview_if_possible(self) -> None:
-        if self.preview_widget.current_frame is not None:
-            self.preview_widget.display_frame(self.preview_widget.current_frame)
+        frame = self._current_frame
+        if frame is not None:
+            display_frame = self._apply_view_transforms(frame)
+            self._frame_provider.update_frame(display_frame)
+            self._bridge.push_frame()
 
     def _on_export_scope_changed(self, scope: str) -> None:
         self._export_full_resolution = scope == "full"
@@ -307,7 +252,6 @@ class MainWindow(QMainWindow):
             "SD card storage is not available on this system.",
         )
         self._storage_sd_selected = False
-        self._sync_settings_panel_from_state()
 
     def _on_power_clicked(self) -> None:
         if self.camera is not None and self.camera.is_connected:
@@ -319,6 +263,7 @@ class MainWindow(QMainWindow):
             self.camera = None
             self._sync_top_chrome()
             self.statusBar().showMessage("Camera disconnected")
+            self._bridge.push_status("Camera disconnected")
             return
         if self.camera_config:
             if self.initialize_camera(self.camera_config):
@@ -345,6 +290,7 @@ class MainWindow(QMainWindow):
 
     def _on_auto_color_toggled(self, enabled: bool) -> None:
         self._auto_color_balance_enabled = bool(enabled)
+        self._bridge.push_auto_color(enabled)
         if not self._auto_color_balance_enabled:
             self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
             self.statusBar().showMessage("Auto color balance disabled")
@@ -356,7 +302,7 @@ class MainWindow(QMainWindow):
         self._recalculate_auto_color_balance(show_status=True)
 
     def _recalculate_auto_color_balance(self, *, show_status: bool = False) -> None:
-        frame = self.preview_widget.current_frame
+        frame = self._current_frame if self._current_frame is not None else self.preview_widget.current_frame
         if frame is None or frame.size == 0:
             if show_status:
                 self.statusBar().showMessage(
@@ -392,16 +338,17 @@ class MainWindow(QMainWindow):
 
     def _stub_recenter_roi(self) -> None:
         if not self._roi_mode_active:
-            self.statusBar().showMessage("Enable ROI mode first")
+            self._bridge.push_toast("Enable ROI mode first")
             return
         self.preview_widget.recenter_roi()
+        self._bridge.push_toast("ROI recentered")
         self.statusBar().showMessage("ROI recentered")
 
     def _stub_roi_mode(self, enabled: bool) -> None:
         self._roi_mode_active = bool(enabled)
-        self.preview_widget.set_roi_mode(self._roi_mode_active)
+        # preview_widget is hidden; QML ROI overlay handles drawing
         self.statusBar().showMessage(
-            "ROI mode enabled - drag to draw/edit box"
+            "ROI mode enabled – draw a box on the image"
             if self._roi_mode_active
             else "ROI mode disabled"
         )
@@ -411,14 +358,13 @@ class MainWindow(QMainWindow):
             return
         preset = self._presets[index]
         if not preset:
-            self.statusBar().showMessage(
-                f"Preset {index + 1} is empty. Press and hold to save current setup."
-            )
+            self._bridge.push_toast(f"Preset {index + 1} is empty – hold to save")
             return
         try:
             self._apply_preset(preset)
             self._active_preset_index = index
-            self._clinical.bottom_bar().set_active_preset(index)
+            self._bridge.push_active_preset(index)
+            self._bridge.push_toast(f"Preset {index + 1} applied")
             self.statusBar().showMessage(f"Preset {index + 1} applied")
         except Exception as e:
             QMessageBox.warning(self, "Presets", f"Failed to apply preset {index + 1}.\n\n{e}")
@@ -428,68 +374,13 @@ class MainWindow(QMainWindow):
             return
         self._presets[index] = self._capture_current_preset()
         self._active_preset_index = index
-        self._clinical.bottom_bar().set_active_preset(index)
+        self._bridge.push_active_preset(index)
         self._save_presets()
-        self._show_toast(f"Preset {index + 1} stored")
+        self._bridge.push_toast(f"Preset {index + 1} stored")
 
     def _show_toast(self, message: str, duration_ms: int = 2800) -> None:
-        """Brief on-screen confirmation (touch-friendly, above bottom bar)."""
-        cw = self.centralWidget()
-        if cw is None:
-            return
-        if self._toast is None:
-            self._toast = QLabel(cw)
-            self._toast.setObjectName("Toast")
-            self._toast.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._toast.setStyleSheet(
-                """
-                QLabel#Toast {
-                    background-color: rgba(36, 38, 44, 0.94);
-                    color: #ffffff;
-                    border: 1px solid rgba(255, 255, 255, 0.22);
-                    border-radius: 14px;
-                    padding: 16px 28px;
-                    font-size: 16px;
-                    font-weight: 600;
-                }
-                """
-            )
-            self._toast.setWordWrap(True)
-            self._toast.setMaximumWidth(min(520, max(280, cw.width() - 80)))
-        self._toast.setText(message)
-        self._toast.adjustSize()
-        self._position_toast()
-        self._toast.raise_()
-        self._toast.show()
-        if self._toast_timer is not None:
-            self._toast_timer.stop()
-        self._toast_timer = QTimer(self)
-        self._toast_timer.setSingleShot(True)
-        self._toast_timer.timeout.connect(self._hide_toast)
-        self._toast_timer.start(duration_ms)
-
-    def _hide_toast(self) -> None:
-        if self._toast is not None:
-            self._toast.hide()
-
-    def _position_toast(self) -> None:
-        if self._toast is None:
-            return
-        cw = self.centralWidget()
-        if cw is None:
-            return
-        self._toast.setMaximumWidth(min(520, max(280, cw.width() - 80)))
-        self._toast.adjustSize()
-        margin_x = 24
-        margin_bottom = 132
-        x = (cw.width() - self._toast.width()) // 2
-        y = cw.height() - self._toast.height() - margin_bottom
-        self._toast.move(max(margin_x, x), max(24, y))
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        if self._toast is not None and self._toast.isVisible():
-            self._position_toast()
+        """Forward to QML toast via bridge."""
+        self._bridge.push_toast(message, duration_ms)
 
     def _refresh_preview_if_idle(self) -> None:
         pass
@@ -510,8 +401,8 @@ class MainWindow(QMainWindow):
                 "warmth": int(iv.warmth),
                 "tint": int(iv.tint),
             },
-            "brightness": int(self._clinical.bottom_bar().brightness_percent()),
-            "zoom": int(self._clinical.bottom_bar().zoom_percent()),
+            "brightness": self._brightness,
+            "zoom":       self._zoom,
             "flip_h": bool(self._flip_h),
             "flip_v": bool(self._flip_v),
             "rotate_q": int(self._rotate_quarter_turns),
@@ -533,10 +424,18 @@ class MainWindow(QMainWindow):
             tint=int(ivd.get("tint", 50)),
         )
         self.image_settings.set_values(iv, block_signals=True)
+        # Push updated image settings to QML panel
+        self._bridge.push_image_settings({
+            'exposure': int(iv.exposure), 'gain': int(iv.gain),
+            'whiteBalance': int(iv.white_balance), 'contrast': int(iv.contrast),
+            'saturation': int(iv.saturation), 'warmth': int(iv.warmth),
+            'tint': int(iv.tint),
+        })
 
-        bb = self._clinical.bottom_bar()
-        bb.set_brightness_percent(int(preset.get("brightness", 50)))
-        bb.set_zoom_percent(int(preset.get("zoom", 0)))
+        self._brightness = int(preset.get("brightness", 50))
+        self._zoom       = int(preset.get("zoom", 0))
+        self._bridge.push_brightness(self._brightness)
+        self._bridge.push_zoom(self._zoom)
 
         self._flip_h = bool(preset.get("flip_h", False))
         self._flip_v = bool(preset.get("flip_v", False))
@@ -551,7 +450,8 @@ class MainWindow(QMainWindow):
             self.preview_widget.set_roi_rect(None)
 
         roi_enabled = bool(preset.get("roi_mode", False))
-        self._clinical.right_rail().roi_mode_button().setChecked(roi_enabled)
+        self._roi_mode_active = roi_enabled
+        self._bridge.push_roi_mode(roi_enabled)
 
         gains = preset.get("auto_color_gains", [1.0, 1.0, 1.0])
         if isinstance(gains, list) and len(gains) == 3:
@@ -561,7 +461,8 @@ class MainWindow(QMainWindow):
         else:
             self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
         ac_enabled = bool(preset.get("auto_color_enabled", False))
-        self._clinical.right_rail().auto_color_button().setChecked(ac_enabled)
+        self._auto_color_balance_enabled = ac_enabled
+        self._bridge.push_auto_color(ac_enabled)
 
         self._redraw_preview_if_possible()
 
@@ -585,15 +486,11 @@ class MainWindow(QMainWindow):
         p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     def _sync_top_chrome(self) -> None:
-        """Keep top status pill, power label, and capture button aligned with camera state."""
+        """Keep top status pill and capture button aligned with camera state."""
         c = self.camera
         connected = c is not None and c.is_connected
         grabbing = connected and c.is_grabbing
-        self._clinical.top_bar().set_connected(connected)
-        self._clinical.top_bar().set_power_primary_text(
-            "Power Off" if connected else "Connect"
-        )
-        self._clinical.right_rail().set_capture_enabled(grabbing)
+        self._bridge.push_connected(connected, grabbing)
 
     @staticmethod
     def _zoom_crop(bgr: np.ndarray, pct: int) -> np.ndarray:
@@ -620,10 +517,8 @@ class MainWindow(QMainWindow):
     def _apply_view_transforms(self, bgr: np.ndarray) -> np.ndarray:
         if bgr is None or bgr.size == 0:
             return bgr
-        z = self._clinical.bottom_bar().zoom_percent()
-        br = self._clinical.bottom_bar().brightness_percent()
-        out = self._zoom_crop(bgr, z)
-        out = self._brightness_adjust(out, br)
+        out = self._zoom_crop(bgr, self._zoom)
+        out = self._brightness_adjust(out, self._brightness)
         if self._flip_h:
             out = cv2.flip(out, 1)
         if self._flip_v:
@@ -673,7 +568,9 @@ class MainWindow(QMainWindow):
         interval_ms = max(1, self.preview_timer.interval())
         fps = 1000.0 / interval_ms
         mbps = (frame_w * frame_h * 3.0 * fps) / 1_000_000.0
-        self._clinical.top_bar().set_stats_text(frame_w, frame_h, fps, mbps)
+        self._bridge.push_stats(
+            f"{frame_w} X {frame_h}    {fps:.0f} fps    {mbps:.1f} MB/s"
+        )
 
     def _on_image_settings_hardware_push(self) -> None:
         """Apply exposure/gain sliders when those channels are in manual mode."""
@@ -751,6 +648,7 @@ class MainWindow(QMainWindow):
             print_camera_settings(self.camera)
             
             self.statusBar().showMessage("Camera connected successfully")
+            self._bridge.push_status("Camera connected")
             self._sync_top_chrome()
 
             return True
@@ -832,18 +730,17 @@ class MainWindow(QMainWindow):
         """Stop camera preview."""
         if self.preview_timer:
             self.preview_timer.stop()
-        
+
         if self.camera:
             try:
                 self.camera.stop_grabbing()
             except Exception:
                 pass
-        
-        self.preview_widget.clear_display()
 
+        self._current_frame = None
         self._sync_top_chrome()
-
         self.statusBar().showMessage("Preview stopped")
+        self._bridge.push_status("Preview stopped")
     
     def update_preview(self) -> None:
         """Update preview with latest frame."""
@@ -863,11 +760,14 @@ class MainWindow(QMainWindow):
                 frame = self._apply_auto_color_balance(frame)
                 h, w = frame.shape[:2]
                 self._update_stream_stats(w, h)
-                frame = self._apply_view_transforms(frame)
-                self.preview_widget.display_frame(frame)
-            else:
-                # Frame grab failed, but don't show error for every failed frame
-                pass
+                # Store raw (pre-view-transform) frame for ROI / auto-color sampling
+                self._current_frame = frame
+                self.preview_widget.display_frame(frame)  # stores current_frame
+                # Apply brightness/zoom/flip/rotate for display
+                display_frame = self._apply_view_transforms(frame)
+                # Push to QML image provider
+                self._frame_provider.update_frame(display_frame)
+                self._bridge.push_frame()
                 
         except CameraGrabError:
             # Handle grab errors silently during preview
