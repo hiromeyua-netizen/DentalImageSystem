@@ -33,6 +33,23 @@ except Exception:  # pragma: no cover - optional env without pypylon
     CameraConfig = None  # type: ignore[assignment,misc]
     _HAS_BASLER = False
 
+try:
+    from dental_imaging.image_processing.color_adjustments import (
+        ImageSettingsPercent,
+        apply_software_image_adjustments,
+    )
+
+    _HAS_COLOR_ADJ = True
+except Exception:  # pragma: no cover
+    ImageSettingsPercent = None  # type: ignore[assignment,misc]
+    apply_software_image_adjustments = None  # type: ignore[assignment,misc]
+    _HAS_COLOR_ADJ = False
+
+# Same mapping as dental_imaging ImageSettingsHardwareRange defaults.
+EXPOSURE_US_MIN = 1000
+EXPOSURE_US_MAX = 200_000
+GAIN_MAX = 20.0
+
 # Nominal stream rate (UI + timer; matches product reference / camera config).
 TARGET_FPS = 31
 
@@ -50,6 +67,11 @@ class CameraService(QObject):
         self._timer.setInterval(max(16, int(round(1000 / TARGET_FPS))))
         self._timer.timeout.connect(self._on_frame_tick)
         self._stats_t0 = time.perf_counter()
+        self._bridge.exposureChanged.connect(self._on_bridge_exposure_changed)
+        self._bridge.gainChanged.connect(self._on_bridge_gain_changed)
+        self._bridge.imageSettingsDefaultsRestored.connect(
+            self.on_image_settings_defaults_restored
+        )
 
     # ── Detection ───────────────────────────────────────────────────────────
     def refresh_detection(self) -> None:
@@ -159,6 +181,84 @@ class CameraService(QObject):
         self._bridge.push_frame(self._provider)
         self._bridge.toast("Camera disconnected")
 
+    def _bridge_image_settings_snapshot(self) -> Any:
+        return ImageSettingsPercent(
+            exposure=int(self._bridge.exposure),
+            gain=int(self._bridge.gain),
+            white_balance=int(self._bridge.whiteBalance),
+            contrast=int(self._bridge.contrast),
+            saturation=int(self._bridge.saturation),
+            warmth=int(self._bridge.warmth),
+            tint=int(self._bridge.tint),
+        )
+
+    def _apply_software_image_adjustments(self, frame: np.ndarray) -> np.ndarray:
+        if (
+            not _HAS_COLOR_ADJ
+            or apply_software_image_adjustments is None
+            or ImageSettingsPercent is None
+            or frame is None
+            or frame.size == 0
+        ):
+            return frame
+        try:
+            return apply_software_image_adjustments(
+                frame, self._bridge_image_settings_snapshot()
+            )
+        except Exception:
+            return frame
+
+    def _exposure_us_from_slider(self) -> int:
+        pct = max(0, min(100, int(self._bridge.exposure)))
+        span = EXPOSURE_US_MAX - EXPOSURE_US_MIN
+        return int(EXPOSURE_US_MIN + span * pct / 100.0)
+
+    def _gain_from_slider(self) -> float:
+        pct = max(0, min(100, int(self._bridge.gain)))
+        return GAIN_MAX * pct / 100.0
+
+    def _on_bridge_exposure_changed(self, _v: int) -> None:
+        if getattr(self._bridge, "_image_settings_resetting", False):
+            return
+        self._push_exposure_to_camera()
+
+    def _on_bridge_gain_changed(self, _v: int) -> None:
+        if getattr(self._bridge, "_image_settings_resetting", False):
+            return
+        self._push_gain_to_camera()
+
+    def _push_exposure_to_camera(self) -> None:
+        if self._camera is None or not self._bridge.connected:
+            return
+        if not getattr(self._camera, "is_connected", False):
+            return
+        try:
+            self._camera.set_exposure(self._exposure_us_from_slider(), auto=False)
+        except Exception:
+            pass
+
+    def _push_gain_to_camera(self) -> None:
+        if self._camera is None or not self._bridge.connected:
+            return
+        if not getattr(self._camera, "is_connected", False):
+            return
+        try:
+            self._camera.set_gain(self._gain_from_slider(), auto=False)
+        except Exception:
+            pass
+
+    @pyqtSlot()
+    def on_image_settings_defaults_restored(self) -> None:
+        """Reset: neutral sliders + continuous AE / AGC / AWB on the Basler."""
+        if self._camera is None or not getattr(self._camera, "is_connected", False):
+            return
+        try:
+            self._camera.set_exposure(0, auto=True)
+            self._camera.set_gain(0.0, auto=True)
+            self._camera.set_white_balance(auto=True)
+        except Exception:
+            pass
+
     def _on_frame_tick(self) -> None:
         if self._camera is None or not getattr(self._camera, "is_connected", False):
             return
@@ -168,6 +268,7 @@ class CameraService(QObject):
             frame = None
         if frame is None or frame.size == 0:
             return
+        frame = self._apply_software_image_adjustments(frame)
         self._provider.update_overview(frame)
         cropped, x0, y0, cw, ch, fw, fh = zoom_crop_pan(
             frame,

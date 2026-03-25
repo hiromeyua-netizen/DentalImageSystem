@@ -56,6 +56,8 @@ class DentalBridge(QObject):
     toastRequested = pyqtSignal(str, arguments=["message"])
     powerClicked   = pyqtSignal()
     captureClicked = pyqtSignal()
+    #: After Image Settings reset — restore camera AE / AGC / AWB (see CameraService).
+    imageSettingsDefaultsRestored = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -73,13 +75,15 @@ class DentalBridge(QObject):
         self._capturable         = False
         self._cameras_detected   = 0
         self._camera_hint        = "Scanning…"
-        self._exposure           = 26
-        self._gain               = 26
-        self._white_balance      = 26
-        self._contrast           = 26
-        self._saturation         = 26
-        self._warmth             = 26
-        self._tint               = 26
+        # Image Settings: 50 = neutral (matches software post-process + reset).
+        self._exposure           = 50
+        self._gain               = 50
+        self._white_balance      = 50
+        self._contrast           = 50
+        self._saturation         = 50
+        self._warmth             = 50
+        self._tint               = 50
+        self._image_settings_resetting = False
         # Settings modal (reference UI)
         self._show_grid          = False
         self._show_crosshair     = False
@@ -469,14 +473,19 @@ class DentalBridge(QObject):
 
     @pyqtSlot()
     def onImageSettingsReset(self):
-        for attr in ("_exposure","_gain","_white_balance","_contrast",
-                     "_saturation","_warmth","_tint"):
-            setattr(self, attr, 50)
-        for sig in (self.exposureChanged, self.gainChanged, self.whiteBalanceChanged,
-                    self.contrastChanged, self.saturationChanged,
-                    self.warmthChanged, self.tintChanged):
-            sig.emit(50)
-        self.toast("Settings reset to defaults")
+        self._image_settings_resetting = True
+        try:
+            for attr in ("_exposure", "_gain", "_white_balance", "_contrast",
+                         "_saturation", "_warmth", "_tint"):
+                setattr(self, attr, 50)
+            for sig in (self.exposureChanged, self.gainChanged, self.whiteBalanceChanged,
+                        self.contrastChanged, self.saturationChanged,
+                        self.warmthChanged, self.tintChanged):
+                sig.emit(50)
+            self.toast("Settings reset to defaults")
+        finally:
+            self._image_settings_resetting = False
+        self.imageSettingsDefaultsRestored.emit()
 
     # ── Settings modal slots ──────────────────────────────────────────────────
     @pyqtSlot(bool)
