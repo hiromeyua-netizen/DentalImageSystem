@@ -39,6 +39,8 @@ class DentalBridge(QObject):
     captureDelaySecChanged      = pyqtSignal(int)
     cameraSoundEnabledChanged   = pyqtSignal(bool)
     storageSdcardChanged        = pyqtSignal(bool)
+    camerasDetectedCountChanged = pyqtSignal(int)
+    cameraDiscoveryHintChanged  = pyqtSignal(str)
 
     # ── Action signals (connect from outside for real behaviour) ──────────────
     toastRequested = pyqtSignal(str, arguments=["message"])
@@ -47,9 +49,9 @@ class DentalBridge(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # Mock display values matching the reference screenshot
-        self._connected          = True
-        self._stats_text         = "1920 × 1080   31 fps   102.8 MB/s"
+        # Stream off until CameraService connects
+        self._connected          = False
+        self._stats_text         = "— × —   — fps   — MB/s"
         self._frame_counter      = 0
         self._brightness         = 26
         self._zoom               = 26
@@ -58,7 +60,9 @@ class DentalBridge(QObject):
         self._settings_panel_vis = False
         self._auto_color         = False
         self._roi_mode           = False
-        self._capturable         = True
+        self._capturable         = False
+        self._cameras_detected   = 0
+        self._camera_hint        = "Scanning…"
         self._exposure           = 26
         self._gain               = 26
         self._white_balance      = 26
@@ -163,20 +167,47 @@ class DentalBridge(QObject):
     @pyqtProperty(bool, notify=storageSdcardChanged)
     def storageSdcard(self): return self._storage_sdcard
 
+    @pyqtProperty(int, notify=camerasDetectedCountChanged)
+    def camerasDetectedCount(self): return self._cameras_detected
+
+    @pyqtProperty(str, notify=cameraDiscoveryHintChanged)
+    def cameraDiscoveryHint(self): return self._camera_hint
+
     # ── Python-side setters (called by backend) ───────────────────────────────
     def set_connected(self, v):
         if self._connected != v:
             self._connected = v; self.connectedChanged.emit(v)
 
     def set_stats(self, w, h, fps, mbps):
-        t = f"{w} × {h}   {fps:.0f} fps   {mbps:.1f} MB/s"
+        if w <= 0 or h <= 0:
+            t = "— × —   — fps   — MB/s"
+        else:
+            t = f"{w} × {h}   {fps:.0f} fps   {mbps:.1f} MB/s"
         if self._stats_text != t:
-            self._stats_text = t; self.statsTextChanged.emit(t)
+            self._stats_text = t
+            self.statsTextChanged.emit(t)
 
-    def push_frame(self, provider):
-        """Call after provider.update_frame(); increments the QML counter."""
+    def clear_stream_stats(self):
+        self.set_stats(0, 0, 0, 0)
+
+    def set_camera_detection(self, count: int, summary: str):
+        if self._cameras_detected != count:
+            self._cameras_detected = count
+            self.camerasDetectedCountChanged.emit(count)
+        if self._camera_hint != summary:
+            self._camera_hint = summary
+            self.cameraDiscoveryHintChanged.emit(summary)
+
+    def push_frame(self, _provider=None):
+        """Call after provider.update_frame(); increments the QML image URL counter."""
         self._frame_counter += 1
         self.frameCounterChanged.emit(self._frame_counter)
+
+    def set_capturable(self, v: bool):
+        v = bool(v)
+        if self._capturable != v:
+            self._capturable = v
+            self.capturableChanged.emit(v)
 
     def set_brightness(self, v):
         v = max(0, min(100, v))
@@ -209,6 +240,9 @@ class DentalBridge(QObject):
 
     @pyqtSlot()
     def onCapture(self):
+        if not self._capturable:
+            self.toast("Connect the camera to capture")
+            return
         self.captureClicked.emit()
         self.toast("Image captured")
 

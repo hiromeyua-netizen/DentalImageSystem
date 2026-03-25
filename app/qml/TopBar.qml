@@ -64,6 +64,17 @@ Rectangle {
             elide: Text.ElideRight
         }
 
+        // Camera detection summary (only while disconnected)
+        Text {
+            visible: !bridge.connected && topBarRoot._aw > 560 && bridge.cameraDiscoveryHint.length > 0
+            text: bridge.cameraDiscoveryHint
+            font.pixelSize: topBarRoot._compact ? 8 : 9
+            color: Qt.rgba(1, 1, 1, 0.45)
+            Layout.alignment: Qt.AlignVCenter
+            Layout.maximumWidth: Math.min(200, topBarRoot._aw * 0.2)
+            elide: Text.ElideRight
+        }
+
         // ── CONNECTED pill (ref: solid white + dark label when live) ────────
         Rectangle {
             height: topBarRoot._compact ? 26 : 30

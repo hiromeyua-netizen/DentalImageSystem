@@ -15,6 +15,7 @@ def main():
     from PyQt6.QtQml import QQmlApplicationEngine
     from PyQt6.QtCore import QUrl
     from bridge import DentalBridge
+    from camera_service import CameraService
     from provider import FrameProvider
 
     app = QGuiApplication(sys.argv)
@@ -22,15 +23,20 @@ def main():
 
     engine = QQmlApplicationEngine()
 
-    bridge   = DentalBridge()
+    bridge = DentalBridge()
     provider = FrameProvider()
+    camera_service = CameraService(bridge, provider)
 
     engine.addImageProvider("camera", provider)
     engine.rootContext().setContextProperty("bridge", bridge)
+    engine.rootContext().setContextProperty("cameraService", camera_service)
+    bridge.powerClicked.connect(camera_service.toggle_connection)
     engine.load(QUrl.fromLocalFile(str(ROOT / "qml" / "main.qml")))
 
     if not engine.rootObjects():
         return 1
+
+    camera_service.refresh_detection()
     return app.exec()
 
 

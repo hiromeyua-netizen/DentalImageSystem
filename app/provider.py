@@ -25,6 +25,10 @@ class FrameProvider(QQuickImageProvider):
         with self._lock:
             self._frame = qi.copy()
 
+    def reset_to_placeholder(self):
+        with self._lock:
+            self._frame = self._placeholder()
+
     def requestImage(self, _id, _size):
         with self._lock:
             img = self._frame.copy()
