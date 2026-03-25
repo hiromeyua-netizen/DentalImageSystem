@@ -92,16 +92,22 @@ ApplicationWindow {
         }
 
         // Minimap: full-frame thumb + viewport rectangle
+        // (Must anchor to parent/sibling only — bottomBar is not parent of this Item.)
         Rectangle {
             id: minimapChrome
             z: 4
-            visible: bridge.connected && bridge.zoom > 2
+            readonly property real desiredHeight: Math.max(40, Math.round(width * Math.max(0.2, bridge.minimapAspectRatio)))
+            readonly property real bottomInset: bottomBar.height + Math.max(12, win.marginV + (win.uiShort ? 4 : 10)) + 10
+            readonly property real topClearance: topBar.y + topBar.height + 10
+            readonly property real availableHeight: Math.max(0, parent.height - bottomInset - topClearance)
+
+            visible: bridge.connected && bridge.zoom > 2 && availableHeight >= 40
             anchors.left: parent.left
-            anchors.bottom: bottomBar.top
+            anchors.bottom: parent.bottom
             anchors.leftMargin: Math.max(12, win.marginH)
-            anchors.bottomMargin: Math.max(10, win.marginV)
+            anchors.bottomMargin: bottomInset
             width: win.uiNarrow ? 96 : 128
-            height: Math.max(40, Math.round(width * Math.max(0.2, bridge.minimapAspectRatio)))
+            height: Math.min(desiredHeight, availableHeight)
             radius: 10
             color: Qt.rgba(0, 0, 0, 0.5)
             border.width: 1
