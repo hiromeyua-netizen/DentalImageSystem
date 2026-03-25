@@ -56,6 +56,8 @@ class DentalBridge(QObject):
     toastRequested = pyqtSignal(str, arguments=["message"])
     powerClicked   = pyqtSignal()
     captureClicked = pyqtSignal()
+    captureSaved   = pyqtSignal(str, int, int, arguments=["path", "width", "height"])
+    captureFailed  = pyqtSignal(str, arguments=["message"])
     #: After Image Settings reset — restore camera AE / AGC / AWB (see CameraService).
     imageSettingsDefaultsRestored = pyqtSignal()
 

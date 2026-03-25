@@ -357,7 +357,15 @@ class CameraService(QObject):
             self._snapshot_writer.set_jpeg_quality(int(self._bridge.imageQuality))
             result = self._snapshot_writer.save_bgr(out, prefix="capture")
             self._bridge.toast(f"Saved: {result.path.name}")
+            try:
+                self._bridge.captureSaved.emit(str(result.path), int(result.width), int(result.height))
+            except Exception:
+                pass
         except Exception as exc:
             self._bridge.toast(f"Capture failed: {exc}")
+            try:
+                self._bridge.captureFailed.emit(str(exc))
+            except Exception:
+                pass
         finally:
             self._capture_in_progress = False

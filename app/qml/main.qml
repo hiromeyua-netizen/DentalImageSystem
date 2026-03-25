@@ -20,6 +20,9 @@ ApplicationWindow {
     readonly property real marginH:   Math.max(10, Math.min(18, width * 0.016))
     readonly property real marginV:   Math.max(8, Math.min(14, height * 0.014))
     readonly property real railW:     uiNarrow ? 66 : 76
+    property string lastCapturePath: ""
+    property int lastCaptureW: 0
+    property int lastCaptureH: 0
 
     readonly property real bottomBarTargetW: {
         const frac = uiNarrow ? 0.90 : 0.68
@@ -235,9 +238,87 @@ ApplicationWindow {
         }
     }
 
+    Popup {
+        id: captureModal
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: Math.round((win.width - width) / 2)
+        y: Math.round((win.height - height) / 2)
+        width: Math.min(420, Math.max(280, win.width * 0.42))
+
+        background: Rectangle {
+            radius: 14
+            color: Qt.rgba(0.10, 0.10, 0.12, 0.92)
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.18)
+        }
+
+        contentItem: Column {
+            spacing: 10
+            padding: 16
+
+            Text {
+                text: "Capture saved"
+                font.pixelSize: 16
+                font.bold: true
+                color: "#ffffff"
+                wrapMode: Text.Wrap
+            }
+
+            Text {
+                text: (win.lastCaptureW > 0 && win.lastCaptureH > 0)
+                      ? (win.lastCaptureW + " × " + win.lastCaptureH)
+                      : ""
+                font.pixelSize: 12
+                color: Qt.rgba(1, 1, 1, 0.72)
+            }
+
+            Text {
+                text: win.lastCapturePath
+                font.pixelSize: 12
+                color: Qt.rgba(1, 1, 1, 0.82)
+                wrapMode: Text.WrapAnywhere
+            }
+
+            Row {
+                spacing: 10
+
+                Button {
+                    text: "Open Folder"
+                    onClicked: {
+                        if (!win.lastCapturePath)
+                            return
+                        var p = win.lastCapturePath
+                        p = p.replace(/\\/g, "/")
+                        var idx = p.lastIndexOf("/")
+                        var dir = (idx >= 0) ? p.substring(0, idx) : p
+                        Qt.openUrlExternally("file:///" + dir)
+                    }
+                }
+
+                Item { width: 1; height: 1; Layout.fillWidth: true }
+
+                Button {
+                    text: "OK"
+                    onClicked: captureModal.close()
+                }
+            }
+        }
+    }
+
     Connections {
         target: bridge
         function onToastRequested(message) { toast.show(message) }
+        function onCaptureSaved(path, width, height) {
+            win.lastCapturePath = path
+            win.lastCaptureW = width
+            win.lastCaptureH = height
+            captureModal.open()
+        }
+        function onCaptureFailed(message) {
+            // Keep toast for failures; modal is for success acknowledgement.
+        }
     }
 
     Item {
