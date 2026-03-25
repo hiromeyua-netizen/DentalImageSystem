@@ -45,12 +45,15 @@ class CameraFrameProvider(QQuickImageProvider):
             rgb.data, w, h, w * 3, QImage.Format.Format_RGB888
         ).copy()
 
-    def requestImage(self, id: str, requested_size: QSize) -> QImage:
-        """Return the latest frame image.
-        PyQt6 omits the C++ ``QSize *size`` output parameter — the actual
-        dimensions are inferred from the returned QImage's own size().
+    def requestImage(self, id: str, requested_size: QSize):
+        """Return (QImage, QSize) so the engine knows the actual frame dimensions.
+
+        PyQt6 collapses the C++ ``QSize *size`` output parameter: the method
+        is called with two args (id, requestedSize) and must return a
+        ``(QImage, QSize)`` 2-tuple.
         """
-        return self._frame if self._frame is not None else self._blank
+        img = self._frame if self._frame is not None else self._blank
+        return img, img.size()
 
 
 # ---------------------------------------------------------------------------
