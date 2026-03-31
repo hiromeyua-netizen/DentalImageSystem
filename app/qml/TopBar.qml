@@ -76,6 +76,18 @@ Rectangle {
             elide: Text.ElideRight
         }
 
+        Text {
+            visible: topBarRoot._aw > 980 && bridge.ledControllerStatusText.length > 0
+            text: bridge.ledControllerStatusText
+            font.pixelSize: topBarRoot._compact ? 8 : 9
+            color: bridge.ledControllerConnected
+                ? Qt.rgba(0.72, 1.0, 0.78, 0.88)
+                : Qt.rgba(1, 0.74, 0.74, 0.78)
+            Layout.alignment: Qt.AlignVCenter
+            Layout.maximumWidth: Math.min(290, topBarRoot._aw * 0.27)
+            elide: Text.ElideRight
+        }
+
         // ── CONNECTED pill (ref: solid white + dark label when live) ────────
         Rectangle {
             id: connPill

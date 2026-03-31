@@ -239,6 +239,15 @@ Rectangle {
                 Item { Layout.fillWidth: true }
             }
 
+            Text {
+                Layout.fillWidth: true
+                text: "Filename preview: " + bridge.captureNamePreview
+                font.pixelSize: 11
+                color: Qt.rgba(1, 1, 1, 0.62)
+                elide: Text.ElideMiddle
+                Layout.bottomMargin: 16
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.bottomMargin: 14
@@ -372,6 +381,15 @@ Rectangle {
                     active: bridge.storageSdcard
                     onClicked: bridge.onStorageSdcard(true)
                 }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: bridge.storageStatusText
+                font.pixelSize: 11
+                color: Qt.rgba(1, 1, 1, 0.62)
+                elide: Text.ElideMiddle
+                Layout.bottomMargin: 22
             }
 
             // —— About ——

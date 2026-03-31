@@ -6,12 +6,18 @@ Slots       : QML  → Python  (@pyqtSlot)
 Action sigs : emitted by slots, connect externally for real behaviour
 """
 from datetime import datetime
+import json
 import os
 from pathlib import Path
 import shutil
 from urllib.parse import unquote, urlparse
 
 from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+STORAGE_CONFIG_PATH = PROJECT_ROOT / "config" / "storage_config.json"
+DEFAULT_EXPORT_WARN_FREE_BYTES = 1 * 1024 * 1024 * 1024   # 1 GiB
+DEFAULT_EXPORT_RESERVE_BYTES = 128 * 1024 * 1024          # 128 MiB
 
 
 class DentalBridge(QObject):
@@ -51,8 +57,11 @@ class DentalBridge(QObject):
     cameraDiscoveryHintChanged  = pyqtSignal(str)
     ledControllerConnectedChanged = pyqtSignal(bool)
     ledControllerPortChanged    = pyqtSignal(str)
+    ledControllerStatusTextChanged = pyqtSignal(str)
+    storageStatusTextChanged    = pyqtSignal(str)
     patientIdChanged            = pyqtSignal(str)
     useLastPatientIdChanged     = pyqtSignal(bool)
+    captureNamePreviewChanged   = pyqtSignal(str)
     flipHorizontalChanged       = pyqtSignal(bool)
     flipVerticalChanged         = pyqtSignal(bool)
     rotateQuarterTurnsChanged   = pyqtSignal(int)
@@ -79,6 +88,9 @@ class DentalBridge(QObject):
     presetSaveRequested = pyqtSignal(int, arguments=["index"])
     appExitRequested = pyqtSignal()
     exportAllFolderPickerRequested = pyqtSignal()
+    exportAllCompleted = pyqtSignal(
+        str, int, int, int, arguments=["folderPath", "exportedCount", "renamedCount", "failedCount"]
+    )
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -98,6 +110,7 @@ class DentalBridge(QObject):
         self._camera_hint        = "Scanning…"
         self._led_connected      = False
         self._led_port           = ""
+        self._led_status_text    = "LED controller: reconnecting..."
         self._patient_id         = ""
         self._use_last_patient_id = True
         # Image Settings: 50 = neutral (matches software post-process + reset).
@@ -122,6 +135,7 @@ class DentalBridge(QObject):
         self._capture_delay_sec  = 10
         self._camera_sound       = False
         self._storage_sdcard     = False
+        self._storage_status_text = "Storage: SYSTEM"
         self._flip_h             = False
         self._flip_v             = False
         self._rotate_q           = 0  # 0–3 clockwise quarter turns
@@ -139,6 +153,8 @@ class DentalBridge(QObject):
         self._captures_dir       = Path(__file__).resolve().parent.parent / "captures"
         self._restore_settings_after_preview = False
         self._admin_exit_password = os.environ.get("DENTAL_ADMIN_PASSWORD", "admin")
+        self._storage_space_cfg = {}
+        self._load_storage_space_cfg()
 
     # ── QML-readable properties ───────────────────────────────────────────────
     @pyqtProperty(bool, notify=connectedChanged)
@@ -243,11 +259,25 @@ class DentalBridge(QObject):
     @pyqtProperty(str, notify=ledControllerPortChanged)
     def ledControllerPort(self): return self._led_port
 
+    @pyqtProperty(str, notify=ledControllerStatusTextChanged)
+    def ledControllerStatusText(self): return self._led_status_text
+
+    @pyqtProperty(str, notify=storageStatusTextChanged)
+    def storageStatusText(self): return self._storage_status_text
+
     @pyqtProperty(str, notify=patientIdChanged)
     def patientId(self): return self._patient_id
 
     @pyqtProperty(bool, notify=useLastPatientIdChanged)
     def useLastPatientId(self): return self._use_last_patient_id
+
+    @pyqtProperty(str, notify=captureNamePreviewChanged)
+    def captureNamePreview(self):
+        fmt = "png" if bool(self._capture_format_png) else "jpg"
+        mode = "burst" if bool(self._capture_burst) else "capture"
+        pid = self._sanitize_name(self._patient_id)
+        base = f"{pid}_{mode}" if pid else mode
+        return f"{base}_YYYYMMDD_HHMMSS.{fmt}"
 
     @pyqtProperty(bool, notify=flipHorizontalChanged)
     def flipHorizontal(self): return self._flip_h
@@ -322,6 +352,28 @@ class DentalBridge(QObject):
         if self._led_port != port:
             self._led_port = port
             self.ledControllerPortChanged.emit(port)
+        if connected:
+            self.set_led_controller_status_text(f"LED controller: connected ({port})")
+        elif port:
+            self.set_led_controller_status_text(f"LED controller: disconnected ({port})")
+        else:
+            self.set_led_controller_status_text("LED controller: reconnecting...")
+
+    def set_led_controller_status_text(self, text: str) -> None:
+        text = str(text or "").strip()
+        if not text:
+            text = "LED controller: reconnecting..."
+        if self._led_status_text != text:
+            self._led_status_text = text
+            self.ledControllerStatusTextChanged.emit(text)
+
+    def set_storage_status_text(self, text: str) -> None:
+        text = str(text or "").strip()
+        if not text:
+            text = "Storage: SYSTEM"
+        if self._storage_status_text != text:
+            self._storage_status_text = text
+            self.storageStatusTextChanged.emit(text)
 
     def _refresh_capture_items(self, select_path: str = "") -> None:
         files = []
@@ -399,6 +451,11 @@ class DentalBridge(QObject):
         v = max(0, min(100, v))
         if self._brightness != v:
             self._brightness = v; self.brightnessChanged.emit(v)
+
+    @staticmethod
+    def _sanitize_name(text: str) -> str:
+        safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(text or "").strip())
+        return safe.strip("_")
 
     def set_zoom(self, v):
         v = max(0, min(100, int(v)))
@@ -755,6 +812,7 @@ class DentalBridge(QObject):
             return
         self._capture_format_png = png
         self.captureFormatPngChanged.emit(png)
+        self.captureNamePreviewChanged.emit(self.captureNamePreview)
         self.toast("Capture format: PNG" if png else "Capture format: JPG")
 
     @pyqtSlot(bool)
@@ -773,6 +831,7 @@ class DentalBridge(QObject):
             return
         self._capture_burst = burst
         self.captureBurstModeChanged.emit(burst)
+        self.captureNamePreviewChanged.emit(self.captureNamePreview)
         self.toast("Capture mode: BURST" if burst else "Capture mode: SNAPSHOT")
 
     @pyqtSlot(int)
@@ -799,6 +858,7 @@ class DentalBridge(QObject):
         if self._patient_id != pid:
             self._patient_id = pid
             self.patientIdChanged.emit(pid)
+            self.captureNamePreviewChanged.emit(self.captureNamePreview)
 
     @pyqtSlot(bool)
     def onUseLastPatientId(self, use_last):
@@ -825,8 +885,43 @@ class DentalBridge(QObject):
             return Path(path)
         return Path(raw)
 
+    @staticmethod
+    def _fmt_gib(n_bytes: int) -> str:
+        return f"{(max(0, int(n_bytes)) / (1024.0 ** 3)):.2f} GiB"
+
+    def _load_storage_space_cfg(self) -> None:
+        defaults = {
+            "export_warn_free_bytes": DEFAULT_EXPORT_WARN_FREE_BYTES,
+            "export_reserve_bytes": DEFAULT_EXPORT_RESERVE_BYTES,
+        }
+        self._storage_space_cfg = dict(defaults)
+        try:
+            if not STORAGE_CONFIG_PATH.is_file():
+                return
+            data = json.loads(STORAGE_CONFIG_PATH.read_text(encoding="utf-8"))
+            thresholds = data.get("space_thresholds", {})
+            if not isinstance(thresholds, dict):
+                return
+            for key, default_v in defaults.items():
+                raw = thresholds.get(key, default_v)
+                try:
+                    v = int(raw)
+                except Exception:
+                    v = int(default_v)
+                self._storage_space_cfg[key] = max(0, v)
+        except Exception:
+            self._storage_space_cfg = dict(defaults)
+
+    def _storage_limit(self, key: str, default_v: int) -> int:
+        try:
+            return max(0, int(self._storage_space_cfg.get(key, default_v)))
+        except Exception:
+            return int(default_v)
+
     @pyqtSlot(str)
     def onExportAllToFolder(self, folder):
+        # Reload on each export so config tweaks apply without restart.
+        self._load_storage_space_cfg()
         self._refresh_capture_items()
         if not self._capture_items:
             self.toast("No captured images to export")
@@ -843,7 +938,31 @@ class DentalBridge(QObject):
             self.toast(f"Export failed: {exc}")
             return
 
+        # Preflight disk-space check: source total + 128 MiB reserve.
+        try:
+            total_src_bytes = 0
+            for item in self._capture_items:
+                src = Path(str(item.get("path", "")))
+                if src.is_file():
+                    total_src_bytes += int(src.stat().st_size)
+            reserve_bytes = self._storage_limit("export_reserve_bytes", DEFAULT_EXPORT_RESERVE_BYTES)
+            usage = shutil.disk_usage(dst)
+            free_b = int(usage.free)
+            need_b = int(total_src_bytes + reserve_bytes)
+            if free_b < need_b:
+                self.toast(
+                    f"Export blocked: not enough space ({self._fmt_gib(free_b)} free, "
+                    f"{self._fmt_gib(need_b)} required)."
+                )
+                return
+            if free_b < self._storage_limit("export_warn_free_bytes", DEFAULT_EXPORT_WARN_FREE_BYTES):
+                self.toast(f"Low storage warning on export target: {self._fmt_gib(free_b)} free")
+        except Exception:
+            # If we cannot read usage metadata, proceed with best effort.
+            pass
+
         ok = 0
+        renamed = 0
         failed = 0
         for item in self._capture_items:
             src = Path(str(item.get("path", "")))
@@ -859,6 +978,7 @@ class DentalBridge(QObject):
                     cand = dst / f"{stem}_{i}{suf}"
                     if not cand.exists():
                         target = cand
+                        renamed += 1
                         break
                     i += 1
             try:
@@ -871,6 +991,10 @@ class DentalBridge(QObject):
             self.toast(f"Export complete: {ok} files")
         else:
             self.toast(f"Export complete: {ok} ok, {failed} failed")
+        try:
+            self.exportAllCompleted.emit(str(dst), int(ok), int(renamed), int(failed))
+        except Exception:
+            pass
 
     @pyqtSlot(str)
     def onRequestAppExit(self, password):

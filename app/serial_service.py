@@ -58,8 +58,12 @@ class SerialService(QObject):
         if not _HAS_SERIAL:
             if not self._has_announced_missing:
                 self._bridge.toast("pyserial not available; LED controller disabled.")
+                self._bridge.set_led_controller_status_text(
+                    "LED controller unavailable: pyserial missing"
+                )
                 self._has_announced_missing = True
             return
+        self._bridge.set_led_controller_status_text("LED controller: scanning serial ports...")
         self._ensure_connected()
         self._retry.start()
         self._poll.start()
@@ -83,6 +87,9 @@ class SerialService(QObject):
         self._port_name = ""
         self._was_connected = False
         self._bridge.set_led_controller_state(False, "")
+        self._bridge.set_led_controller_status_text(
+            "LED controller disconnected. Retrying..."
+        )
         if was_connected:
             self._bridge.toast("LED controller disconnected.")
 
@@ -97,6 +104,9 @@ class SerialService(QObject):
 
         port = self._find_esp32_port()
         if not port:
+            self._bridge.set_led_controller_status_text(
+                "LED controller not found. Check USB cable/power."
+            )
             return
         self._open_port(port)
 
@@ -141,6 +151,9 @@ class SerialService(QObject):
             s.reset_input_buffer()
             s.reset_output_buffer()
             if not self._handshake_ok(s):
+                self._bridge.set_led_controller_status_text(
+                    f"LED controller on {port} did not respond to STATUS"
+                )
                 s.close()
                 return
             self._ser = s
@@ -151,6 +164,9 @@ class SerialService(QObject):
             # Sync LED output immediately based on preset mode.
             self._sync_led_output(force=True)
         except Exception:
+            self._bridge.set_led_controller_status_text(
+                f"LED controller open failed on {port}. Retrying..."
+            )
             self._close()
 
     def _handshake_ok(self, s) -> bool:

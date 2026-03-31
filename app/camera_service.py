@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -62,6 +63,10 @@ GAIN_MAX = 20.0
 # Nominal stream rate (UI + timer; matches product reference / camera config).
 TARGET_FPS = 31
 BURST_DEFAULT_COUNT = 10
+STORAGE_CONFIG_PATH = PROJECT_ROOT / "config" / "storage_config.json"
+DEFAULT_STORAGE_WARN_FREE_BYTES = 1 * 1024 * 1024 * 1024      # 1 GiB
+DEFAULT_STORAGE_MIN_CAPTURE_FREE_BYTES = 256 * 1024 * 1024    # 256 MiB
+DEFAULT_ESTIMATED_CAPTURE_BYTES = 25 * 1024 * 1024            # conservative single capture estimate
 
 
 class CameraService(QObject):
@@ -89,6 +94,8 @@ class CameraService(QObject):
         self._timer.setInterval(max(16, int(round(1000 / TARGET_FPS))))
         self._timer.timeout.connect(self._on_frame_tick)
         self._stats_t0 = time.perf_counter()
+        self._last_storage_warn_t = 0.0
+        self._storage_space_cfg: dict[str, int] = {}
         self._system_capture_dir = PROJECT_ROOT / "captures"
         self._storage_switch_internal = False
         self._snapshot_writer = None
@@ -108,6 +115,7 @@ class CameraService(QObject):
         self._capture_profile_path = PROJECT_ROOT / "config" / "capture_profile.json"
         self._last_patient_id = ""
         self._load_capture_profile()
+        self._load_storage_space_cfg()
         self._on_storage_target_changed(bool(self._bridge.storageSdcard))
         self._bridge.patientIdChanged.connect(self._on_patient_id_changed)
         self._bridge.useLastPatientIdChanged.connect(self._on_use_last_patient_changed)
@@ -165,6 +173,70 @@ class CameraService(QObject):
             self._snapshot_writer = SnapshotWriter(target_dir, "png", jpeg_quality=94)
         return True
 
+    @staticmethod
+    def _fmt_gib(n_bytes: int) -> str:
+        return f"{(max(0, int(n_bytes)) / (1024.0 ** 3)):.2f} GiB"
+
+    def _load_storage_space_cfg(self) -> None:
+        defaults = {
+            "warn_free_bytes": DEFAULT_STORAGE_WARN_FREE_BYTES,
+            "min_capture_free_bytes": DEFAULT_STORAGE_MIN_CAPTURE_FREE_BYTES,
+            "estimated_capture_bytes": DEFAULT_ESTIMATED_CAPTURE_BYTES,
+        }
+        self._storage_space_cfg = dict(defaults)
+        try:
+            if not STORAGE_CONFIG_PATH.is_file():
+                return
+            data = json.loads(STORAGE_CONFIG_PATH.read_text(encoding="utf-8"))
+            thresholds = data.get("space_thresholds", {})
+            if not isinstance(thresholds, dict):
+                return
+            for key, default_v in defaults.items():
+                raw = thresholds.get(key, default_v)
+                try:
+                    v = int(raw)
+                except Exception:
+                    v = int(default_v)
+                self._storage_space_cfg[key] = max(0, v)
+        except Exception:
+            self._storage_space_cfg = dict(defaults)
+
+    def _storage_limit(self, key: str, default_v: int) -> int:
+        try:
+            return max(0, int(self._storage_space_cfg.get(key, default_v)))
+        except Exception:
+            return int(default_v)
+
+    def _check_capture_storage_space(self) -> bool:
+        """
+        Guard captures against nearly-full destination media.
+        Returns True when capture can continue.
+        """
+        target_dir = self._resolved_capture_dir()
+        try:
+            usage = shutil.disk_usage(target_dir)
+            free_b = int(usage.free)
+        except Exception:
+            return True
+
+        required = self._storage_limit("min_capture_free_bytes", DEFAULT_STORAGE_MIN_CAPTURE_FREE_BYTES) + self._storage_limit(
+            "estimated_capture_bytes", DEFAULT_ESTIMATED_CAPTURE_BYTES
+        )
+        if free_b < required:
+            self._bridge.toast(
+                f"Storage almost full ({self._fmt_gib(free_b)} free). "
+                "Free space or switch storage target."
+            )
+            return False
+
+        now = time.monotonic()
+        if free_b < self._storage_limit("warn_free_bytes", DEFAULT_STORAGE_WARN_FREE_BYTES) and (now - self._last_storage_warn_t) > 30.0:
+            self._last_storage_warn_t = now
+            self._bridge.toast(
+                f"Low storage warning: {self._fmt_gib(free_b)} free on capture target."
+            )
+        return True
+
     @pyqtSlot(bool)
     def _on_storage_target_changed(self, sdcard: bool) -> None:
         if self._storage_switch_internal:
@@ -174,6 +246,9 @@ class CameraService(QObject):
             sd = self._detect_sd_capture_dir()
             if sd is None:
                 self._bridge.toast("SD card not detected. Using SYSTEM storage.")
+                self._bridge.set_storage_status_text(
+                    "Storage: SYSTEM (SD card not detected; fallback active)"
+                )
                 self._storage_switch_internal = True
                 try:
                     self._bridge.onStorageSdcard(False)
@@ -181,8 +256,12 @@ class CameraService(QObject):
                     self._storage_switch_internal = False
             else:
                 self._bridge.toast(f"Storage target: SD CARD ({sd})")
+                self._bridge.set_storage_status_text(f"Storage: SD CARD ({sd})")
         else:
             self._bridge.toast("Storage target: SYSTEM")
+            self._bridge.set_storage_status_text(
+                f"Storage: SYSTEM ({self._system_capture_dir})"
+            )
         self._ensure_snapshot_writer()
 
     # ── Presets (3 slots) ───────────────────────────────────────────────────
@@ -561,6 +640,8 @@ class CameraService(QObject):
         if not self._ensure_snapshot_writer() or self._snapshot_writer is None:
             self._bridge.toast("Capture storage is unavailable in this build.")
             return
+        if not self._check_capture_storage_space():
+            return
 
         mode = "burst" if bool(self._bridge.captureBurstMode) else "snapshot"
         self._start_capture_with_optional_delay(mode)
@@ -699,6 +780,9 @@ class CameraService(QObject):
         if self._camera is None or not getattr(self._camera, "is_connected", False):
             self._stop_burst_internal(silent=True)
             self._bridge.toast("Burst stopped (camera disconnected)")
+            return
+        if not self._check_capture_storage_space():
+            self._stop_burst_internal(silent=False)
             return
 
         next_idx = self._burst_index + 1

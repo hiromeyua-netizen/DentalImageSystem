@@ -29,6 +29,10 @@ ApplicationWindow {
     property string lastCapturePath: ""
     property int lastCaptureW: 0
     property int lastCaptureH: 0
+    property string lastExportFolder: ""
+    property int lastExportedCount: 0
+    property int lastExportRenamedCount: 0
+    property int lastExportFailedCount: 0
 
     readonly property real bottomBarTargetW: {
         const frac = uiNarrow ? 0.90 : 0.68
@@ -317,6 +321,14 @@ ApplicationWindow {
         }
     }
 
+    ExportResultModal {
+        id: exportResultModal
+        folderPath: win.lastExportFolder
+        exportedCount: win.lastExportedCount
+        renamedCount: win.lastExportRenamedCount
+        failedCount: win.lastExportFailedCount
+    }
+
     FolderDialog {
         id: exportFolderDialog
         title: "Export Captured Images"
@@ -407,6 +419,13 @@ ApplicationWindow {
         }
         function onExportAllFolderPickerRequested() {
             exportFolderDialog.open()
+        }
+        function onExportAllCompleted(folderPath, exportedCount, renamedCount, failedCount) {
+            win.lastExportFolder = folderPath
+            win.lastExportedCount = exportedCount
+            win.lastExportRenamedCount = renamedCount
+            win.lastExportFailedCount = failedCount
+            exportResultModal.open()
         }
         function onAppExitRequested() {
             kioskLock = false

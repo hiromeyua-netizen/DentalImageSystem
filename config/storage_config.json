@@ -19,5 +19,12 @@
   "organization": {
     "create_patient_folders": true,
     "folder_format": "Patient_{patient_id}"
+  },
+  "space_thresholds": {
+    "warn_free_bytes": 1073741824,
+    "min_capture_free_bytes": 268435456,
+    "estimated_capture_bytes": 26214400,
+    "export_warn_free_bytes": 1073741824,
+    "export_reserve_bytes": 134217728
   }
 }
