@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from dental_imaging.image_processing.color_adjustments import (
+from camera_core.image_processing.color_adjustments import (
     ImageSettingsPercent,
     apply_software_image_adjustments,
 )

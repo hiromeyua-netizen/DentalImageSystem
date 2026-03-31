@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from dental_imaging.settings.app_settings import (
+from app_settings import (
     load_app_settings,
     resolve_storage_directory,
 )

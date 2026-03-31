@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from dental_imaging.storage.snapshot_writer import SnapshotWriter
+from camera_core.storage.snapshot_writer import SnapshotWriter
 
 
 def test_save_bgr_png(tmp_path) -> None:

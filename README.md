@@ -62,9 +62,11 @@ pip install -r requirements-dev.txt
 
 ```
 dental_image_system/
-├── dental_imaging/      # Main application package
+├── app/                 # Kiosk UI (PyQt6 + QML) and ``camera_core/`` (Basler + snapshot)
 ├── config/              # Configuration files
-├── resources/           # Application resources
+├── firmware/            # ESP32 LED controller (Arduino)
+├── kiosk_main.py        # Console entry that runs ``app/main.py``
+├── resources/           # Optional assets
 ├── tests/               # Test suite
 ├── docs/                # Documentation
 └── scripts/             # Utility scripts

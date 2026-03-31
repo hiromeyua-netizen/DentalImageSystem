@@ -1,15 +1,13 @@
 """
 Live camera session for the QML app: Basler detection, connect/disconnect, preview timer.
 
-Expects project root on sys.path so ``dental_imaging`` imports resolve when running
-``python app/main.py`` from the repository root.
+Run from repo root: ``python app/main.py`` (adds the ``app`` directory to ``sys.path``).
 """
 from __future__ import annotations
 
 import json
 import os
 import shutil
-import sys
 import time
 from pathlib import Path
 from typing import Any, List, Optional
@@ -20,13 +18,11 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSlot
 from view_transforms import apply_view_transforms, zoom_crop_pan
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from dental_imaging.hardware.camera import detect_cameras
-    from dental_imaging.hardware.camera.basler_camera import BaslerCamera
-    from dental_imaging.models.camera_config import CameraConfig
+    from camera_core.hardware.camera import detect_cameras
+    from camera_core.hardware.camera.basler_camera import BaslerCamera
+    from camera_core.models.camera_config import CameraConfig
 
     _HAS_BASLER = True
 except Exception:  # pragma: no cover - optional env without pypylon
@@ -36,7 +32,7 @@ except Exception:  # pragma: no cover - optional env without pypylon
     _HAS_BASLER = False
 
 try:
-    from dental_imaging.image_processing.color_adjustments import (
+    from camera_core.image_processing.color_adjustments import (
         ImageSettingsPercent,
         apply_software_image_adjustments,
     )
@@ -48,14 +44,14 @@ except Exception:  # pragma: no cover
     _HAS_COLOR_ADJ = False
 
 try:
-    from dental_imaging.storage.snapshot_writer import SnapshotWriter
+    from camera_core.storage.snapshot_writer import SnapshotWriter
 
     _HAS_SNAPSHOT_WRITER = True
 except Exception:  # pragma: no cover
     SnapshotWriter = None  # type: ignore[assignment,misc]
     _HAS_SNAPSHOT_WRITER = False
 
-# Same mapping as dental_imaging ImageSettingsHardwareRange defaults.
+# Slider → hardware μs / dB mapping (paired with ``ImageSettingsPercent`` neutral 50).
 EXPOSURE_US_MIN = 1000
 EXPOSURE_US_MAX = 200_000
 GAIN_MAX = 20.0
