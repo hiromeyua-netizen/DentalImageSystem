@@ -41,6 +41,8 @@ class DentalBridge(QObject):
     storageSdcardChanged        = pyqtSignal(bool)
     camerasDetectedCountChanged = pyqtSignal(int)
     cameraDiscoveryHintChanged  = pyqtSignal(str)
+    ledControllerConnectedChanged = pyqtSignal(bool)
+    ledControllerPortChanged    = pyqtSignal(str)
     flipHorizontalChanged       = pyqtSignal(bool)
     flipVerticalChanged         = pyqtSignal(bool)
     rotateQuarterTurnsChanged   = pyqtSignal(int)
@@ -79,6 +81,8 @@ class DentalBridge(QObject):
         self._capturable         = False
         self._cameras_detected   = 0
         self._camera_hint        = "Scanning…"
+        self._led_connected      = False
+        self._led_port           = ""
         # Image Settings: 50 = neutral (matches software post-process + reset).
         self._exposure           = 50
         self._gain               = 50
@@ -202,6 +206,12 @@ class DentalBridge(QObject):
     @pyqtProperty(str, notify=cameraDiscoveryHintChanged)
     def cameraDiscoveryHint(self): return self._camera_hint
 
+    @pyqtProperty(bool, notify=ledControllerConnectedChanged)
+    def ledControllerConnected(self): return self._led_connected
+
+    @pyqtProperty(str, notify=ledControllerPortChanged)
+    def ledControllerPort(self): return self._led_port
+
     @pyqtProperty(bool, notify=flipHorizontalChanged)
     def flipHorizontal(self): return self._flip_h
 
@@ -256,6 +266,16 @@ class DentalBridge(QObject):
         if self._camera_hint != summary:
             self._camera_hint = summary
             self.cameraDiscoveryHintChanged.emit(summary)
+
+    def set_led_controller_state(self, connected: bool, port: str = "") -> None:
+        connected = bool(connected)
+        port = str(port or "")
+        if self._led_connected != connected:
+            self._led_connected = connected
+            self.ledControllerConnectedChanged.emit(connected)
+        if self._led_port != port:
+            self._led_port = port
+            self.ledControllerPortChanged.emit(port)
 
     def push_frame(self, _provider=None):
         """Call after provider.update_frame(); increments the QML image URL counter."""

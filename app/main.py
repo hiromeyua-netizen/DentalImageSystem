@@ -17,6 +17,7 @@ def main():
     from bridge import DentalBridge
     from camera_service import CameraService
     from provider import FrameProvider
+    from serial_service import SerialService
 
     app = QGuiApplication(sys.argv)
     app.setApplicationName("Dental Imaging System")
@@ -26,6 +27,7 @@ def main():
     bridge = DentalBridge()
     provider = FrameProvider()
     camera_service = CameraService(bridge, provider)
+    serial_service = SerialService(bridge)
 
     engine.addImageProvider("camera", provider)
     engine.rootContext().setContextProperty("bridge", bridge)
@@ -38,6 +40,8 @@ def main():
 
     camera_service.refresh_detection()
     camera_service.auto_connect_if_available()
+    serial_service.start()
+    app.aboutToQuit.connect(serial_service.stop)
     return app.exec()
 
 
