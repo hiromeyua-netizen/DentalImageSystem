@@ -24,7 +24,13 @@ Item {
     readonly property real boxW: Math.max(0, rightX - leftX)
     readonly property real boxH: Math.max(0, bottomY - topY)
 
-    Rectangle { // Top dim
+    // Base dim so ROI mode is immediately obvious when toggled on.
+    Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, root.selecting ? 0.16 : 0.26)
+    }
+
+    Rectangle { // Top dim cut-out helper
         visible: root.selecting
         x: 0
         y: 0
@@ -71,13 +77,14 @@ Item {
 
     Text {
         anchors.horizontalCenter: parent.horizontalCenter
-        y: 18
+        y: 14
         visible: !root.selecting
         text: "ROI mode: drag diagonally to select area"
-        font.pixelSize: 14
-        color: Qt.rgba(1, 1, 1, 0.88)
+        font.pixelSize: 15
+        font.bold: true
+        color: Qt.rgba(1, 1, 1, 0.93)
         style: Text.Outline
-        styleColor: Qt.rgba(0, 0, 0, 0.55)
+        styleColor: Qt.rgba(0, 0, 0, 0.70)
     }
 
     MouseArea {
@@ -114,6 +121,10 @@ Item {
             var x1n = root.ex / width
             var y1n = root.ey / height
             root.roiCommitted(x0n, y0n, x1n, y1n)
+        }
+
+        onCanceled: {
+            root.selecting = false
         }
     }
 }

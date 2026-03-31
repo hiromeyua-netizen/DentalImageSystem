@@ -354,7 +354,12 @@ class DentalBridge(QObject):
 
     def set_roi_mode(self, v):
         if self._roi_mode != v:
-            self._roi_mode = v; self.roiModeChanged.emit(v)
+            self._roi_mode = v
+            self.roiModeChanged.emit(v)
+            if v:
+                self.toast("ROI mode enabled. Drag diagonally to select.")
+            else:
+                self.toast("ROI mode disabled")
 
     def toast(self, msg):
         self.toastRequested.emit(msg)
