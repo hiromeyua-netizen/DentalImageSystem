@@ -19,6 +19,13 @@ Item {
 
     readonly property real _r: thumbRadius
     readonly property real _m: _r          // track left/right inset
+    property bool _dragging: false
+    property int _dragValue: value
+
+    onValueChanged: {
+        if (!_dragging)
+            _dragValue = value
+    }
 
     // Track
     Rectangle {
@@ -46,14 +53,15 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
 
         x: {
-            var f = (root.value - root.minimum) / Math.max(1, root.maximum - root.minimum)
+            var shown = root._dragging ? root._dragValue : root.value
+            var f = (shown - root.minimum) / Math.max(1, root.maximum - root.minimum)
             return root._m + f * (root.width - 2 * root._m) - root._r
         }
         Behavior on x { NumberAnimation { duration: 55; easing.type: Easing.OutCubic } }
 
         Text {
             anchors.centerIn: parent
-            text: root.value + "%"
+            text: (root._dragging ? root._dragValue : root.value) + "%"
             font.pixelSize: root._r < 17 ? 9 : 10
             font.bold: true
             color: "#16161e"
@@ -63,13 +71,29 @@ Item {
     MouseArea {
         anchors.fill: parent
         cursorShape:  Qt.PointingHandCursor
-        onPressed:         (e) => _update(e.x)
-        onPositionChanged: (e) => { if (pressed) _update(e.x) }
+        onPressed: function (e) {
+            root._dragging = true
+            _update(e.x)
+        }
+        onPositionChanged: function (e) {
+            if (pressed)
+                _update(e.x)
+        }
+        onReleased: {
+            root._dragging = false
+            root._dragValue = root.value
+        }
+        onCanceled: {
+            root._dragging = false
+            root._dragValue = root.value
+        }
     }
 
     function _update(mx) {
         var f = Math.max(0, Math.min(1, (mx - _m) / (width - 2 * _m)))
         var v = Math.round(minimum + f * (maximum - minimum))
-        if (v !== value) { value = v; root.userChanged(v) }
+        root._dragValue = v
+        if (v !== value)
+            root.userChanged(v)
     }
 }
