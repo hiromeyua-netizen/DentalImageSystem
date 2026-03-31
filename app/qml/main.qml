@@ -263,6 +263,14 @@ ApplicationWindow {
         captureH: win.lastCaptureH
     }
 
+    CapturePreviewModal {
+        id: capturePreviewModal
+        onClosed: {
+            if (bridge.capturePreviewVisible)
+                bridge.onCapturePreviewClose()
+        }
+    }
+
     Connections {
         target: bridge
         function onToastRequested(message) { toast.show(message) }
@@ -274,6 +282,10 @@ ApplicationWindow {
         }
         function onCaptureFailed(message) {
             // Keep toast for failures; modal is for success acknowledgement.
+        }
+        function onCapturePreviewVisibleChanged(v) {
+            if (v) capturePreviewModal.open()
+            else capturePreviewModal.close()
         }
     }
 

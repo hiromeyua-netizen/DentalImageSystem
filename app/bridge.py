@@ -5,6 +5,9 @@ Properties  : Python → QML  (pyqtProperty + notify signal)
 Slots       : QML  → Python  (@pyqtSlot)
 Action sigs : emitted by slots, connect externally for real behaviour
 """
+from datetime import datetime
+from pathlib import Path
+
 from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot
 
 
@@ -55,6 +58,9 @@ class DentalBridge(QObject):
     minimapViewportWidthChanged = pyqtSignal(float)
     minimapViewportHeightChanged = pyqtSignal(float)
     minimapAspectRatioChanged   = pyqtSignal(float)
+    capturePreviewVisibleChanged = pyqtSignal(bool)
+    captureItemsChanged         = pyqtSignal()
+    capturePreviewIndexChanged  = pyqtSignal(int)
 
     # ── Action signals (connect from outside for real behaviour) ──────────────
     toastRequested = pyqtSignal(str, arguments=["message"])
@@ -101,7 +107,7 @@ class DentalBridge(QObject):
         self._capture_format_png = True
         self._image_quality      = 94
         self._leds_auto          = True
-        self._capture_burst      = True
+        self._capture_burst      = False
         self._burst_active       = False
         self._burst_progress     = ""
         self._capture_delay_sec  = 10
@@ -118,6 +124,10 @@ class DentalBridge(QObject):
         self._mv_w               = 1.0
         self._mv_h               = 1.0
         self._minimap_ar         = 1080.0 / 1920.0  # height / width
+        self._capture_preview_visible = False
+        self._capture_items      = []
+        self._capture_preview_index = -1
+        self._captures_dir       = Path(__file__).resolve().parent.parent / "captures"
 
     # ── QML-readable properties ───────────────────────────────────────────────
     @pyqtProperty(bool, notify=connectedChanged)
@@ -252,6 +262,15 @@ class DentalBridge(QObject):
     @pyqtProperty(float, notify=minimapAspectRatioChanged)
     def minimapAspectRatio(self): return self._minimap_ar
 
+    @pyqtProperty(bool, notify=capturePreviewVisibleChanged)
+    def capturePreviewVisible(self): return self._capture_preview_visible
+
+    @pyqtProperty("QVariantList", notify=captureItemsChanged)
+    def captureItems(self): return self._capture_items
+
+    @pyqtProperty(int, notify=capturePreviewIndexChanged)
+    def capturePreviewIndex(self): return self._capture_preview_index
+
     # ── Python-side setters (called by backend) ───────────────────────────────
     def set_connected(self, v):
         if self._connected != v:
@@ -286,6 +305,57 @@ class DentalBridge(QObject):
         if self._led_port != port:
             self._led_port = port
             self.ledControllerPortChanged.emit(port)
+
+    def _refresh_capture_items(self, select_path: str = "") -> None:
+        files = []
+        exts = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+        if self._captures_dir.is_dir():
+            for p in self._captures_dir.iterdir():
+                if p.is_file() and p.suffix.lower() in exts:
+                    try:
+                        mtime = p.stat().st_mtime
+                    except Exception:
+                        mtime = 0.0
+                    files.append((mtime, p))
+        files.sort(key=lambda t: t[0], reverse=True)
+
+        old_len = len(self._capture_items)
+        self._capture_items = []
+        for mtime, p in files:
+            self._capture_items.append(
+                {
+                    "name": p.name,
+                    "path": str(p),
+                    "url": p.resolve().as_uri(),
+                    "datetime": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    "mtime": float(mtime),
+                }
+            )
+
+        idx = -1
+        if select_path:
+            for i, item in enumerate(self._capture_items):
+                if str(item.get("path", "")) == str(select_path):
+                    idx = i
+                    break
+        if idx < 0 and self._capture_items:
+            idx = 0
+        self._set_capture_preview_index(idx)
+        if old_len != len(self._capture_items) or old_len > 0 or len(self._capture_items) > 0:
+            self.captureItemsChanged.emit()
+
+    def _set_capture_preview_index(self, idx: int) -> None:
+        n = len(self._capture_items)
+        if n <= 0:
+            idx = -1
+        else:
+            idx = max(0, min(n - 1, int(idx)))
+        if self._capture_preview_index != idx:
+            self._capture_preview_index = idx
+            self.capturePreviewIndexChanged.emit(idx)
+
+    def note_capture_saved(self, path: str) -> None:
+        self._refresh_capture_items(select_path=path)
 
     def push_frame(self, _provider=None):
         """Call after provider.update_frame(); increments the QML image URL counter."""
@@ -675,9 +745,12 @@ class DentalBridge(QObject):
 
     @pyqtSlot(bool)
     def onCaptureBurstMode(self, burst):
-        if self._capture_burst != burst:
-            self._capture_burst = burst
-            self.captureBurstModeChanged.emit(burst)
+        burst = bool(burst)
+        if self._capture_burst == burst:
+            return
+        self._capture_burst = burst
+        self.captureBurstModeChanged.emit(burst)
+        self.toast("Capture mode: BURST" if burst else "Capture mode: SNAPSHOT")
 
     @pyqtSlot(int)
     def onCaptureDelaySec(self, sec):
@@ -700,3 +773,39 @@ class DentalBridge(QObject):
     @pyqtSlot()
     def onExportAllClicked(self):
         self.toast("Export all (stub)")
+
+    @pyqtSlot()
+    def onCapturePreviewOpen(self):
+        self._refresh_capture_items()
+        if not self._capture_items:
+            self.toast("No captured images found")
+            return
+        if not self._capture_preview_visible:
+            self._capture_preview_visible = True
+            self.capturePreviewVisibleChanged.emit(True)
+
+    @pyqtSlot()
+    def onCapturePreviewClose(self):
+        if self._capture_preview_visible:
+            self._capture_preview_visible = False
+            self.capturePreviewVisibleChanged.emit(False)
+
+    @pyqtSlot()
+    def onCapturePreviewRefresh(self):
+        self._refresh_capture_items()
+
+    @pyqtSlot(int)
+    def onCapturePreviewSelect(self, idx):
+        self._set_capture_preview_index(int(idx))
+
+    @pyqtSlot()
+    def onCapturePreviewNext(self):
+        if not self._capture_items:
+            return
+        self._set_capture_preview_index(self._capture_preview_index + 1)
+
+    @pyqtSlot()
+    def onCapturePreviewPrevious(self):
+        if not self._capture_items:
+            return
+        self._set_capture_preview_index(self._capture_preview_index - 1)

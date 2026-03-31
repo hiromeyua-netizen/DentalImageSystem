@@ -155,11 +155,10 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.bottomMargin: 12
-                Text {
+                SettingsPillButton {
                     text: "PREVIEW"
-                    font.pixelSize: 11
-                    font.weight: Font.Medium
-                    color: Qt.rgba(1, 1, 1, 0.52)
+                    active: bridge.capturePreviewVisible
+                    onClicked: bridge.onCapturePreviewOpen()
                 }
                 Item { Layout.fillWidth: true }
                 Text {

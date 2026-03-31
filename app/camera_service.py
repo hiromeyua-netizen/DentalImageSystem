@@ -461,6 +461,10 @@ class CameraService(QObject):
             self._snapshot_writer.set_image_format(fmt)
             self._snapshot_writer.set_jpeg_quality(int(self._bridge.imageQuality))
             result = self._snapshot_writer.save_bgr(out, prefix=prefix)
+            try:
+                self._bridge.note_capture_saved(str(result.path))
+            except Exception:
+                pass
             if emit_saved_signal:
                 try:
                     self._bridge.captureSaved.emit(str(result.path), int(result.width), int(result.height))
