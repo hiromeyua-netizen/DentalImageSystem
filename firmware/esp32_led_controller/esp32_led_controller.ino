@@ -24,6 +24,8 @@ static const uint8_t PWM_PIN = 2;       // IO02
 static const uint8_t PWM_CH = 0;
 static const uint32_t PWM_FREQ = 20000; // 20 kHz (quiet for LEDs)
 static const uint8_t PWM_RES_BITS = 12; // 0..4095
+// Hardware polarity: true for active-low LED driver input (inverted brightness response).
+static const bool PWM_ACTIVE_LOW = true;
 
 // ---- State ----
 static uint8_t g_brightnessPct = 0;      // 0..100 currently applied
@@ -32,7 +34,11 @@ static String g_line;
 
 static uint32_t pctToDuty(uint8_t pct) {
   const uint32_t maxDuty = (1UL << PWM_RES_BITS) - 1UL;
-  return (uint32_t)((maxDuty * (uint32_t)pct) / 100UL);
+  uint32_t duty = (uint32_t)((maxDuty * (uint32_t)pct) / 100UL);
+  if (PWM_ACTIVE_LOW) {
+    duty = maxDuty - duty;
+  }
+  return duty;
 }
 
 static void applyBrightness(uint8_t pct) {
