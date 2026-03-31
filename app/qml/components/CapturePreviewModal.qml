@@ -38,7 +38,10 @@ Popup {
 
             // Left preview
             ColumnLayout {
-                Layout.preferredWidth: Math.round(parent.width * 0.36)
+                Layout.fillWidth: true
+                Layout.preferredWidth: Math.round(root.width * 0.38)
+                Layout.minimumWidth: 320
+                Layout.maximumWidth: Math.round(root.width * 0.50)
                 Layout.fillHeight: true
                 spacing: 10
 
@@ -147,6 +150,8 @@ Popup {
             // Right thumbnails grid
             Rectangle {
                 Layout.fillWidth: true
+                Layout.preferredWidth: Math.round(root.width * 0.62)
+                Layout.minimumWidth: 360
                 Layout.fillHeight: true
                 radius: 14
                 color: Qt.rgba(0, 0, 0, 0.16)
@@ -159,7 +164,8 @@ Popup {
                     anchors.fill: parent
                     anchors.margins: 10
                     model: bridge.captureItems
-                    cellWidth: Math.floor((width - 3 * 10) / 4)
+                    readonly property int cols: width < 620 ? 3 : 4
+                    cellWidth: Math.floor((width - (cols - 1) * 10) / cols)
                     cellHeight: Math.round(cellWidth * 0.86)
                     clip: true
                     interactive: true
