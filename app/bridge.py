@@ -428,6 +428,46 @@ class DentalBridge(QObject):
             self._pan_y = ny
             self.previewPanYChanged.emit(ny)
 
+    @pyqtSlot(float, float, float, float)
+    def applyRoiSelection(self, x0n, y0n, x1n, y1n):
+        """
+        Apply ROI box (normalized preview coords) as zoom+pan target.
+        Release-to-apply: centers selected region and scales zoom to fit it.
+        """
+        x0 = max(0.0, min(1.0, float(x0n)))
+        y0 = max(0.0, min(1.0, float(y0n)))
+        x1 = max(0.0, min(1.0, float(x1n)))
+        y1 = max(0.0, min(1.0, float(y1n)))
+
+        lx, rx = (x0, x1) if x0 <= x1 else (x1, x0)
+        ty, by = (y0, y1) if y0 <= y1 else (y1, y0)
+        rw = rx - lx
+        rh = by - ty
+        if rw < 0.02 or rh < 0.02:
+            self.toast("ROI area too small")
+            return
+
+        # Existing zoom model uses crop fraction f = 1 - 0.7 * (zoom/100).
+        fit_frac = max(rw, rh)
+        t = (1.0 - fit_frac) / 0.7
+        zoom = int(round(max(0.0, min(1.0, t)) * 100.0))
+        zoom = max(3, zoom)
+        self.set_zoom(zoom)
+
+        cx = (lx + rx) * 0.5
+        cy = (ty + by) * 0.5
+        if cx != self._pan_x:
+            self._pan_x = cx
+            self.previewPanXChanged.emit(cx)
+        if cy != self._pan_y:
+            self._pan_y = cy
+            self.previewPanYChanged.emit(cy)
+
+        if self._roi_mode:
+            self._roi_mode = False
+            self.roiModeChanged.emit(False)
+        self.toast("ROI applied")
+
     @pyqtSlot(int)
     def onPresetClicked(self, idx):
         if self._active_preset == idx:
@@ -509,7 +549,9 @@ class DentalBridge(QObject):
     def onRoiModeToggled(self, v): self.set_roi_mode(v)
 
     @pyqtSlot()
-    def onRecenterRoi(self): self.toast("ROI recentered")
+    def onRecenterRoi(self):
+        self._reset_preview_pan()
+        self.toast("ROI recentered")
 
     @pyqtSlot()
     def onFlipH(self):

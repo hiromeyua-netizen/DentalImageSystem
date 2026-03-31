@@ -71,12 +71,20 @@ ApplicationWindow {
             showCrosshair: bridge.showCrosshair
         }
 
+        RoiSelectionOverlay {
+            z: 0.95
+            roiMode: bridge.connected && bridge.roiMode
+            onRoiCommitted: function (x0n, y0n, x1n, y1n) {
+                bridge.applyRoiSelection(x0n, y0n, x1n, y1n)
+            }
+        }
+
         // Drag to pan when zoomed (phone-style)
         MouseArea {
             id: panArea
             z: 1
             anchors.fill: parent
-            enabled: bridge.connected && bridge.zoom > 2
+            enabled: bridge.connected && bridge.zoom > 2 && !bridge.roiMode
             acceptedButtons: Qt.LeftButton
             hoverEnabled: true
             cursorShape: !enabled ? Qt.ArrowCursor
