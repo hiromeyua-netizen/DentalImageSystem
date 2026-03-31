@@ -740,9 +740,12 @@ class DentalBridge(QObject):
 
     @pyqtSlot(bool)
     def onLedsPresetAuto(self, auto_on):
-        if self._leds_auto != auto_on:
-            self._leds_auto = auto_on
-            self.ledsPresetAutoChanged.emit(auto_on)
+        auto_on = bool(auto_on)
+        if self._leds_auto == auto_on:
+            return
+        self._leds_auto = auto_on
+        self.ledsPresetAutoChanged.emit(auto_on)
+        self.toast("LED preset: AUTO" if auto_on else "LED preset: 50%")
 
     @pyqtSlot(bool)
     def onCaptureBurstMode(self, burst):

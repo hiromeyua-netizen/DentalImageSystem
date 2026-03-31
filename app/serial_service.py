@@ -51,6 +51,7 @@ class SerialService(QObject):
         self._last_status_ok_t = 0.0
 
         self._bridge.brightnessChanged.connect(self._on_bridge_brightness_changed)
+        self._bridge.ledsPresetAutoChanged.connect(self._on_leds_preset_changed)
         self._bridge.set_led_controller_state(False, "")
 
     def start(self) -> None:
@@ -147,8 +148,8 @@ class SerialService(QObject):
             self._was_connected = True
             self._bridge.set_led_controller_state(True, port)
             self._bridge.toast(f"LED controller connected ({port})")
-            # Sync current slider value immediately.
-            self._send_dim(int(self._bridge.brightness), force=True)
+            # Sync LED output immediately based on preset mode.
+            self._sync_led_output(force=True)
         except Exception:
             self._close()
 
@@ -184,6 +185,17 @@ class SerialService(QObject):
         if self._write_line(f"DIM:{pct}"):
             self._last_dim_sent = pct
 
+    def _sync_led_output(self, *, force: bool = False) -> None:
+        # AUTO follows brightness slider. Manual preset enforces fixed 50%.
+        if bool(self._bridge.ledsPresetAuto):
+            target = int(self._bridge.brightness)
+        else:
+            target = 50
+        self._pending_dim = target
+        if self._ser is None:
+            return
+        self._send_dim(target, force=force)
+
     def _flush_pending_dim(self) -> None:
         if self._pending_dim < 0:
             return
@@ -214,8 +226,21 @@ class SerialService(QObject):
 
     @pyqtSlot(int)
     def _on_bridge_brightness_changed(self, v: int) -> None:
+        if not bool(self._bridge.ledsPresetAuto):
+            return
         self._pending_dim = max(0, min(100, int(v)))
         if self._ser is None:
             return
         self._dim_flush.start()
+
+    @pyqtSlot(bool)
+    def _on_leds_preset_changed(self, auto_on: bool) -> None:
+        # Keep UI and output consistent when entering fixed 50% mode.
+        if not bool(auto_on):
+            try:
+                if int(self._bridge.brightness) != 50:
+                    self._bridge.set_brightness(50)
+            except Exception:
+                pass
+        self._sync_led_output(force=True)
 
