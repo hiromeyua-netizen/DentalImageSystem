@@ -8,6 +8,8 @@ Action sigs : emitted by slots, connect externally for real behaviour
 from datetime import datetime
 import os
 from pathlib import Path
+import shutil
+from urllib.parse import unquote, urlparse
 
 from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot
 
@@ -76,6 +78,7 @@ class DentalBridge(QObject):
     presetRecallRequested = pyqtSignal(int, arguments=["index"])
     presetSaveRequested = pyqtSignal(int, arguments=["index"])
     appExitRequested = pyqtSignal()
+    exportAllFolderPickerRequested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -747,9 +750,12 @@ class DentalBridge(QObject):
 
     @pyqtSlot(bool)
     def onCaptureFormatPng(self, png):
-        if self._capture_format_png != png:
-            self._capture_format_png = png
-            self.captureFormatPngChanged.emit(png)
+        png = bool(png)
+        if self._capture_format_png == png:
+            return
+        self._capture_format_png = png
+        self.captureFormatPngChanged.emit(png)
+        self.toast("Capture format: PNG" if png else "Capture format: JPG")
 
     @pyqtSlot(bool)
     def onLedsPresetAuto(self, auto_on):
@@ -803,7 +809,68 @@ class DentalBridge(QObject):
 
     @pyqtSlot()
     def onExportAllClicked(self):
-        self.toast("Export all (stub)")
+        self.exportAllFolderPickerRequested.emit()
+
+    def _decode_folder_input(self, folder: str) -> Path:
+        raw = str(folder or "").strip()
+        if not raw:
+            return Path()
+        # Handle FolderDialog URL form: file:///C:/...
+        if raw.startswith("file:"):
+            p = urlparse(raw)
+            path = unquote(p.path or "")
+            # Windows: /C:/Users/... -> C:/Users/...
+            if len(path) >= 3 and path[0] == "/" and path[2] == ":":
+                path = path[1:]
+            return Path(path)
+        return Path(raw)
+
+    @pyqtSlot(str)
+    def onExportAllToFolder(self, folder):
+        self._refresh_capture_items()
+        if not self._capture_items:
+            self.toast("No captured images to export")
+            return
+
+        dst = self._decode_folder_input(str(folder))
+        if not str(dst):
+            self.toast("Export cancelled")
+            return
+
+        try:
+            dst.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            self.toast(f"Export failed: {exc}")
+            return
+
+        ok = 0
+        failed = 0
+        for item in self._capture_items:
+            src = Path(str(item.get("path", "")))
+            if not src.is_file():
+                failed += 1
+                continue
+            target = dst / src.name
+            if target.exists():
+                stem = src.stem
+                suf = src.suffix
+                i = 1
+                while True:
+                    cand = dst / f"{stem}_{i}{suf}"
+                    if not cand.exists():
+                        target = cand
+                        break
+                    i += 1
+            try:
+                shutil.copy2(src, target)
+                ok += 1
+            except Exception:
+                failed += 1
+
+        if failed == 0:
+            self.toast(f"Export complete: {ok} files")
+        else:
+            self.toast(f"Export complete: {ok} ok, {failed} failed")
 
     @pyqtSlot(str)
     def onRequestAppExit(self, password):

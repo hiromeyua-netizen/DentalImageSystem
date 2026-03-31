@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import "components"
 
 // ── Application window ────────────────────────────────────────────────────────
@@ -91,20 +92,32 @@ ApplicationWindow {
 
             property int zoomStart: 0
             property real pinchStartScale: 1.0
+            property int lastAppliedZoom: 0
 
             onPinchStarted: {
                 zoomStart = bridge.zoom
                 pinchStartScale = Math.max(0.1, pinch.scale)
+                lastAppliedZoom = bridge.zoom
             }
 
             onPinchUpdated: {
                 var rel = pinch.scale / Math.max(0.1, pinchStartScale)
-                // Smooth logarithmic response around current zoom.
-                var dz = Math.log(rel) / Math.log(1.06) * 2.0
+                // Ignore micro-jitter around neutral pinch on touch panels.
+                if (Math.abs(rel - 1.0) < 0.02)
+                    return
+                // Log response tuned for Elo-class touch panels.
+                var dz = Math.log(rel) / Math.log(1.08) * 2.0
                 var target = Math.round(zoomStart + dz)
                 target = Math.max(0, Math.min(100, target))
+                // Bound per-update jumps to keep zoom smooth and controllable.
+                var maxStep = 3
+                if (target > lastAppliedZoom + maxStep)
+                    target = lastAppliedZoom + maxStep
+                else if (target < lastAppliedZoom - maxStep)
+                    target = lastAppliedZoom - maxStep
                 if (target !== bridge.zoom)
                     bridge.onZoomChanged(target)
+                lastAppliedZoom = target
             }
         }
 
@@ -304,6 +317,14 @@ ApplicationWindow {
         }
     }
 
+    FolderDialog {
+        id: exportFolderDialog
+        title: "Export Captured Images"
+        onAccepted: {
+            bridge.onExportAllToFolder(selectedFolder.toString())
+        }
+    }
+
     Popup {
         id: kioskExitDialog
         modal: true
@@ -383,6 +404,9 @@ ApplicationWindow {
         function onCapturePreviewVisibleChanged(v) {
             if (v) capturePreviewModal.open()
             else capturePreviewModal.close()
+        }
+        function onExportAllFolderPickerRequested() {
+            exportFolderDialog.open()
         }
         function onAppExitRequested() {
             kioskLock = false
