@@ -49,6 +49,10 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+### Quick start on Windows (for operators)
+
+Double-click **`RunDentalImaging.bat`** in the project folder. It creates a local **`venv`**, installs packages from **`requirements.txt`**, and starts **`app/main.py`**. Install the **Basler Pylon SDK** on that PC first (see Prerequisites above).
+
 **Note:** `pypylon>=26.2.1` requires the Basler Pylon SDK to be installed on your system. The Python package alone is not sufficient.
 
 ## Development
@@ -66,6 +70,7 @@ dental_image_system/
 ├── config/              # Configuration files
 ├── firmware/            # ESP32 LED controller (Arduino)
 ├── logs/                # Runtime logs (if used)
+├── RunDentalImaging.bat # Windows: install deps (venv) and launch UI
 ├── kiosk_main.py        # Console entry that runs ``app/main.py``
 └── project_requirements.txt
 ```
