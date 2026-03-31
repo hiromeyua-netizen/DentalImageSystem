@@ -82,12 +82,38 @@ ApplicationWindow {
             }
         }
 
+        // Touch gestures: 2-finger pinch zoom (Elo PCAP).
+        PinchArea {
+            id: pinchArea
+            z: 0.98
+            anchors.fill: parent
+            enabled: bridge.connected && !bridge.roiMode
+
+            property int zoomStart: 0
+            property real pinchStartScale: 1.0
+
+            onPinchStarted: {
+                zoomStart = bridge.zoom
+                pinchStartScale = Math.max(0.1, pinch.scale)
+            }
+
+            onPinchUpdated: {
+                var rel = pinch.scale / Math.max(0.1, pinchStartScale)
+                // Smooth logarithmic response around current zoom.
+                var dz = Math.log(rel) / Math.log(1.06) * 2.0
+                var target = Math.round(zoomStart + dz)
+                target = Math.max(0, Math.min(100, target))
+                if (target !== bridge.zoom)
+                    bridge.onZoomChanged(target)
+            }
+        }
+
         // Drag to pan when zoomed (phone-style)
         MouseArea {
             id: panArea
             z: 1
             anchors.fill: parent
-            enabled: bridge.connected && bridge.zoom > 2 && !bridge.roiMode
+            enabled: bridge.connected && bridge.zoom > 2 && !bridge.roiMode && !pinchArea.pinch.active
             acceptedButtons: Qt.LeftButton
             hoverEnabled: true
             cursorShape: !enabled ? Qt.ArrowCursor
