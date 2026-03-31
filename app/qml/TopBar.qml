@@ -6,6 +6,7 @@ import QtQuick.Window
 // Layout:  [Logo]  [spacer]  [stream stats]  [CONNECTED pill]  [Power button]
 Rectangle {
     id: topBarRoot
+    signal shutdownRequested()
     radius: height * 0.5
     clip: true
     color: Qt.rgba(0.06, 0.07, 0.11, 0.44)
@@ -77,6 +78,7 @@ Rectangle {
 
         // ── CONNECTED pill (ref: solid white + dark label when live) ────────
         Rectangle {
+            id: connPill
             height: topBarRoot._compact ? 26 : 30
             width:  pillText.implicitWidth + (topBarRoot._compact ? 20 : 26)
             radius: height * 0.5
@@ -99,6 +101,13 @@ Rectangle {
                 }
                 color: bridge.connected ? "#1a1c22" : "#ff9090"
                 Behavior on color { ColorAnimation { duration: 280 } }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: bridge.onPowerClicked()
             }
         }
 
@@ -124,7 +133,7 @@ Rectangle {
             MouseArea {
                 id: pwrMa; anchors.fill: parent
                 hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                onClicked: bridge.onPowerClicked()
+                onClicked: topBarRoot.shutdownRequested()
             }
 
             scale: pwrMa.pressed ? 0.90 : 1.0

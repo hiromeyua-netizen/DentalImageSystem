@@ -206,6 +206,10 @@ ApplicationWindow {
             rightMargin: marginH
         }
         height: uiCompact ? 50 : 56
+        onShutdownRequested: {
+            kioskExitDialog.open()
+            exitPassword.forceActiveFocus()
+        }
     }
 
     // ── Bottom bar (width capped vs. right rail) ────────────────────────────
