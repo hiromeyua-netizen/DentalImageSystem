@@ -6,6 +6,7 @@ Slots       : QML  → Python  (@pyqtSlot)
 Action sigs : emitted by slots, connect externally for real behaviour
 """
 from datetime import datetime
+import os
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot
@@ -48,6 +49,8 @@ class DentalBridge(QObject):
     cameraDiscoveryHintChanged  = pyqtSignal(str)
     ledControllerConnectedChanged = pyqtSignal(bool)
     ledControllerPortChanged    = pyqtSignal(str)
+    patientIdChanged            = pyqtSignal(str)
+    useLastPatientIdChanged     = pyqtSignal(bool)
     flipHorizontalChanged       = pyqtSignal(bool)
     flipVerticalChanged         = pyqtSignal(bool)
     rotateQuarterTurnsChanged   = pyqtSignal(int)
@@ -72,6 +75,7 @@ class DentalBridge(QObject):
     imageSettingsDefaultsRestored = pyqtSignal()
     presetRecallRequested = pyqtSignal(int, arguments=["index"])
     presetSaveRequested = pyqtSignal(int, arguments=["index"])
+    appExitRequested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -91,6 +95,8 @@ class DentalBridge(QObject):
         self._camera_hint        = "Scanning…"
         self._led_connected      = False
         self._led_port           = ""
+        self._patient_id         = ""
+        self._use_last_patient_id = True
         # Image Settings: 50 = neutral (matches software post-process + reset).
         self._exposure           = 50
         self._gain               = 50
@@ -129,6 +135,7 @@ class DentalBridge(QObject):
         self._capture_preview_index = -1
         self._captures_dir       = Path(__file__).resolve().parent.parent / "captures"
         self._restore_settings_after_preview = False
+        self._admin_exit_password = os.environ.get("DENTAL_ADMIN_PASSWORD", "admin")
 
     # ── QML-readable properties ───────────────────────────────────────────────
     @pyqtProperty(bool, notify=connectedChanged)
@@ -232,6 +239,12 @@ class DentalBridge(QObject):
 
     @pyqtProperty(str, notify=ledControllerPortChanged)
     def ledControllerPort(self): return self._led_port
+
+    @pyqtProperty(str, notify=patientIdChanged)
+    def patientId(self): return self._patient_id
+
+    @pyqtProperty(bool, notify=useLastPatientIdChanged)
+    def useLastPatientId(self): return self._use_last_patient_id
 
     @pyqtProperty(bool, notify=flipHorizontalChanged)
     def flipHorizontal(self): return self._flip_h
@@ -774,9 +787,30 @@ class DentalBridge(QObject):
             self._storage_sdcard = sdcard
             self.storageSdcardChanged.emit(sdcard)
 
+    @pyqtSlot(str)
+    def onPatientIdChanged(self, pid):
+        pid = str(pid or "").strip()
+        if self._patient_id != pid:
+            self._patient_id = pid
+            self.patientIdChanged.emit(pid)
+
+    @pyqtSlot(bool)
+    def onUseLastPatientId(self, use_last):
+        use_last = bool(use_last)
+        if self._use_last_patient_id != use_last:
+            self._use_last_patient_id = use_last
+            self.useLastPatientIdChanged.emit(use_last)
+
     @pyqtSlot()
     def onExportAllClicked(self):
         self.toast("Export all (stub)")
+
+    @pyqtSlot(str)
+    def onRequestAppExit(self, password):
+        if str(password or "") == self._admin_exit_password:
+            self.appExitRequested.emit()
+        else:
+            self.toast("Invalid admin password")
 
     @pyqtSlot()
     def onCapturePreviewOpen(self):

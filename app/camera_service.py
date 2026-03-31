@@ -7,6 +7,7 @@ Expects project root on sys.path so ``dental_imaging`` imports resolve when runn
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -76,6 +77,10 @@ class CameraService(QObject):
         self._burst_timer = QTimer(self)
         self._burst_timer.setSingleShot(True)
         self._burst_timer.timeout.connect(self._on_burst_tick)
+        self._capture_delay_timer = QTimer(self)
+        self._capture_delay_timer.setSingleShot(True)
+        self._capture_delay_timer.timeout.connect(self._on_capture_delay_elapsed)
+        self._pending_capture_mode = ""  # "", "snapshot", "burst"
         self._burst_active = False
         self._burst_stop_requested = False
         self._burst_index = 0
@@ -84,23 +89,101 @@ class CameraService(QObject):
         self._timer.setInterval(max(16, int(round(1000 / TARGET_FPS))))
         self._timer.timeout.connect(self._on_frame_tick)
         self._stats_t0 = time.perf_counter()
-        self._snapshot_writer = (
-            SnapshotWriter(PROJECT_ROOT / "captures", "png", jpeg_quality=94)
-            if _HAS_SNAPSHOT_WRITER and SnapshotWriter is not None
-            else None
-        )
+        self._system_capture_dir = PROJECT_ROOT / "captures"
+        self._storage_switch_internal = False
+        self._snapshot_writer = None
         self._bridge.exposureChanged.connect(self._on_bridge_exposure_changed)
         self._bridge.gainChanged.connect(self._on_bridge_gain_changed)
         self._bridge.imageSettingsDefaultsRestored.connect(
             self.on_image_settings_defaults_restored
         )
         self._bridge.captureClicked.connect(self.on_capture_requested)
+        self._bridge.storageSdcardChanged.connect(self._on_storage_target_changed)
         self._bridge.presetSaveRequested.connect(self.on_preset_save_requested)
         self._bridge.presetRecallRequested.connect(self.on_preset_recall_requested)
 
         self._presets_path = PROJECT_ROOT / "config" / "presets.json"
         self._presets: dict[str, dict] = {}
         self._load_presets()
+        self._capture_profile_path = PROJECT_ROOT / "config" / "capture_profile.json"
+        self._last_patient_id = ""
+        self._load_capture_profile()
+        self._on_storage_target_changed(bool(self._bridge.storageSdcard))
+        self._bridge.patientIdChanged.connect(self._on_patient_id_changed)
+        self._bridge.useLastPatientIdChanged.connect(self._on_use_last_patient_changed)
+
+    # ── Storage target routing (SYSTEM / SD CARD) ───────────────────────────
+    def _detect_sd_capture_dir(self) -> Optional[Path]:
+        """Return writable SD/removable target directory, else None."""
+        if os.name != "nt":
+            return None
+        try:
+            import ctypes
+            import string
+
+            get_drive_type = ctypes.windll.kernel32.GetDriveTypeW
+            # DRIVE_REMOVABLE = 2
+            for letter in string.ascii_uppercase:
+                root = f"{letter}:\\"
+                if not Path(root).exists():
+                    continue
+                try:
+                    dtype = int(get_drive_type(root))
+                except Exception:
+                    continue
+                if dtype != 2:
+                    continue
+                target = Path(root) / "DentalImages"
+                try:
+                    target.mkdir(parents=True, exist_ok=True)
+                    probe = target / ".write_test.tmp"
+                    probe.write_text("ok", encoding="utf-8")
+                    probe.unlink(missing_ok=True)
+                    return target
+                except Exception:
+                    continue
+        except Exception:
+            return None
+        return None
+
+    def _resolved_capture_dir(self) -> Path:
+        if bool(self._bridge.storageSdcard):
+            sd = self._detect_sd_capture_dir()
+            if sd is not None:
+                return sd
+        return self._system_capture_dir
+
+    def _ensure_snapshot_writer(self) -> bool:
+        if not _HAS_SNAPSHOT_WRITER or SnapshotWriter is None:
+            self._snapshot_writer = None
+            return False
+        target_dir = self._resolved_capture_dir()
+        if (
+            self._snapshot_writer is None
+            or Path(self._snapshot_writer.base_directory) != target_dir
+        ):
+            self._snapshot_writer = SnapshotWriter(target_dir, "png", jpeg_quality=94)
+        return True
+
+    @pyqtSlot(bool)
+    def _on_storage_target_changed(self, sdcard: bool) -> None:
+        if self._storage_switch_internal:
+            return
+        sdcard = bool(sdcard)
+        if sdcard:
+            sd = self._detect_sd_capture_dir()
+            if sd is None:
+                self._bridge.toast("SD card not detected. Using SYSTEM storage.")
+                self._storage_switch_internal = True
+                try:
+                    self._bridge.onStorageSdcard(False)
+                finally:
+                    self._storage_switch_internal = False
+            else:
+                self._bridge.toast(f"Storage target: SD CARD ({sd})")
+        else:
+            self._bridge.toast("Storage target: SYSTEM")
+        self._ensure_snapshot_writer()
 
     # ── Presets (3 slots) ───────────────────────────────────────────────────
     def _load_presets(self) -> None:
@@ -116,6 +199,57 @@ class CameraService(QObject):
                         self._presets[str(k)] = v
         except Exception:
             self._presets = {}
+
+    # ── Capture profile (patient naming workflow) ───────────────────────────
+    def _load_capture_profile(self) -> None:
+        self._last_patient_id = ""
+        try:
+            if self._capture_profile_path.is_file():
+                data = json.loads(self._capture_profile_path.read_text(encoding="utf-8"))
+                self._last_patient_id = str(data.get("last_patient_id", "")).strip()
+                self._bridge.onUseLastPatientId(bool(data.get("use_last_patient_id", True)))
+        except Exception:
+            self._last_patient_id = ""
+
+        if bool(self._bridge.useLastPatientId) and self._last_patient_id and not str(self._bridge.patientId).strip():
+            self._bridge.onPatientIdChanged(self._last_patient_id)
+
+    def _save_capture_profile(self) -> None:
+        try:
+            self._capture_profile_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "version": 1,
+                "last_patient_id": self._last_patient_id,
+                "use_last_patient_id": bool(self._bridge.useLastPatientId),
+            }
+            self._capture_profile_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    @pyqtSlot(str)
+    def _on_patient_id_changed(self, pid: str) -> None:
+        pid = str(pid or "").strip()
+        if pid:
+            self._last_patient_id = pid
+        self._save_capture_profile()
+
+    @pyqtSlot(bool)
+    def _on_use_last_patient_changed(self, _v: bool) -> None:
+        if bool(self._bridge.useLastPatientId) and self._last_patient_id and not str(self._bridge.patientId).strip():
+            self._bridge.onPatientIdChanged(self._last_patient_id)
+        self._save_capture_profile()
+
+    @staticmethod
+    def _sanitize_name(text: str) -> str:
+        safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(text or "").strip())
+        return safe.strip("_")
+
+    def _capture_prefix(self, base: str, idx: int = 0) -> str:
+        pid = self._sanitize_name(self._bridge.patientId)
+        stem = f"{pid}_{base}" if pid else base
+        if idx > 0:
+            return f"{stem}_{idx:02d}"
+        return stem
 
     def _save_presets(self) -> None:
         try:
@@ -273,6 +407,8 @@ class CameraService(QObject):
 
     def _disconnect(self) -> None:
         self._stop_burst_internal(silent=True)
+        self._capture_delay_timer.stop()
+        self._pending_capture_mode = ""
         self._timer.stop()
         if self._camera is not None:
             try:
@@ -408,6 +544,11 @@ class CameraService(QObject):
     @pyqtSlot()
     def on_capture_requested(self) -> None:
         """Capture one image, or toggle burst start/stop based on current mode."""
+        if self._capture_delay_timer.isActive():
+            self._capture_delay_timer.stop()
+            self._pending_capture_mode = ""
+            self._bridge.toast("Capture cancelled")
+            return
         if self._burst_active:
             self._burst_stop_requested = True
             self._bridge.toast("Stopping burst…")
@@ -417,15 +558,43 @@ class CameraService(QObject):
         if self._camera is None or not getattr(self._camera, "is_connected", False):
             self._bridge.toast("Camera is not connected.")
             return
-        if self._snapshot_writer is None:
+        if not self._ensure_snapshot_writer() or self._snapshot_writer is None:
             self._bridge.toast("Capture storage is unavailable in this build.")
             return
 
-        if bool(self._bridge.captureBurstMode):
+        mode = "burst" if bool(self._bridge.captureBurstMode) else "snapshot"
+        self._start_capture_with_optional_delay(mode)
+
+    def _start_capture_with_optional_delay(self, mode: str) -> None:
+        mode = str(mode or "snapshot").lower()
+        if mode not in ("snapshot", "burst"):
+            mode = "snapshot"
+        delay_s = max(0, int(self._bridge.captureDelaySec))
+        if delay_s <= 0:
+            self._execute_capture_mode(mode)
+            return
+        self._pending_capture_mode = mode
+        self._capture_delay_timer.start(delay_s * 1000)
+        if mode == "burst":
+            self._bridge.toast(f"Burst starts in {delay_s}s (tap capture again to cancel)")
+        else:
+            self._bridge.toast(f"Capture in {delay_s}s (tap capture again to cancel)")
+
+    def _on_capture_delay_elapsed(self) -> None:
+        mode = self._pending_capture_mode
+        self._pending_capture_mode = ""
+        if not mode:
+            return
+        self._execute_capture_mode(mode)
+
+    def _execute_capture_mode(self, mode: str) -> None:
+        if mode == "burst":
             self._start_burst_capture()
             return
-
-        ok, result_name = self._capture_and_save(prefix="capture", emit_saved_signal=True)
+        ok, result_name = self._capture_and_save(
+            prefix=self._capture_prefix("capture"),
+            emit_saved_signal=True
+        )
         if ok and result_name:
             self._bridge.toast(f"Saved: {result_name}")
 
@@ -461,6 +630,7 @@ class CameraService(QObject):
             self._snapshot_writer.set_image_format(fmt)
             self._snapshot_writer.set_jpeg_quality(int(self._bridge.imageQuality))
             result = self._snapshot_writer.save_bgr(out, prefix=prefix)
+            self._play_capture_sound()
             try:
                 self._bridge.note_capture_saved(str(result.path))
             except Exception:
@@ -480,6 +650,24 @@ class CameraService(QObject):
             return False, ""
         finally:
             self._capture_in_progress = False
+
+    def _play_capture_sound(self) -> None:
+        if not bool(self._bridge.cameraSoundEnabled):
+            return
+        # Windows-first subtle feedback; fallback to Qt beep when available.
+        try:
+            import winsound
+
+            winsound.MessageBeep(winsound.MB_OK)
+            return
+        except Exception:
+            pass
+        try:
+            from PyQt6.QtGui import QGuiApplication
+
+            QGuiApplication.beep()
+        except Exception:
+            pass
 
     def _start_burst_capture(self) -> None:
         self._burst_active = True
@@ -514,7 +702,10 @@ class CameraService(QObject):
             return
 
         next_idx = self._burst_index + 1
-        ok, _ = self._capture_and_save(prefix=f"burst_{next_idx:02d}", emit_saved_signal=False)
+        ok, _ = self._capture_and_save(
+            prefix=self._capture_prefix("burst", idx=next_idx),
+            emit_saved_signal=False
+        )
         if ok:
             self._burst_index = next_idx
         self._bridge.set_burst_state(True, f"Burst {self._burst_index}/{self._burst_total}")

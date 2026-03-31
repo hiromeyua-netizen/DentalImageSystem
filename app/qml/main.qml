@@ -13,7 +13,10 @@ ApplicationWindow {
     minimumWidth:  720
     minimumHeight: 480
     visible:       true
+    visibility:    Window.FullScreen
+    flags:         Qt.FramelessWindowHint
     color:         "#0d0f14"
+    property bool kioskLock: true
 
     // ── Responsive chrome (margins + rail width + compact breakpoints) ───
     readonly property bool uiCompact: width < 1180
@@ -271,6 +274,70 @@ ApplicationWindow {
         }
     }
 
+    Popup {
+        id: kioskExitDialog
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: Math.round((win.width - width) / 2)
+        y: Math.round((win.height - height) / 2)
+        width: Math.min(420, Math.max(300, win.width * 0.30))
+
+        background: Rectangle {
+            radius: 16
+            color: Qt.rgba(0.06, 0.06, 0.08, 0.90)
+            border.width: 1
+            border.color: Qt.rgba(1, 1, 1, 0.30)
+        }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 10
+
+            Text {
+                text: "Admin Exit"
+                font.pixelSize: 18
+                font.bold: true
+                color: "#ffffff"
+            }
+            Text {
+                text: "Enter password to close kiosk mode."
+                font.pixelSize: 13
+                color: Qt.rgba(1, 1, 1, 0.74)
+            }
+            TextField {
+                id: exitPassword
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+                placeholderText: "Password"
+                onAccepted: {
+                    bridge.onRequestAppExit(text)
+                    text = ""
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: "Cancel"
+                    onClicked: {
+                        exitPassword.text = ""
+                        kioskExitDialog.close()
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "Exit"
+                    highlighted: true
+                    onClicked: {
+                        bridge.onRequestAppExit(exitPassword.text)
+                        exitPassword.text = ""
+                    }
+                }
+            }
+        }
+    }
+
     Connections {
         target: bridge
         function onToastRequested(message) { toast.show(message) }
@@ -294,6 +361,11 @@ ApplicationWindow {
         focus: true
         Keys.onPressed: (e) => {
             if (e.key === Qt.Key_Space) { bridge.onCapture(); e.accepted = true }
+            if ((e.modifiers & Qt.ControlModifier) && (e.modifiers & Qt.ShiftModifier) && e.key === Qt.Key_Q) {
+                kioskExitDialog.open()
+                exitPassword.forceActiveFocus()
+                e.accepted = true
+            }
             if (e.key === Qt.Key_Escape && bridge.imageSettingsVisible) {
                 bridge.onImageSettingsToggled(false); e.accepted = true
             }
@@ -301,5 +373,13 @@ ApplicationWindow {
                 bridge.onSettingsPanelToggled(false); e.accepted = true
             }
         }
+    }
+
+    onClosing: function (close) {
+        if (!kioskLock)
+            return
+        close.accepted = false
+        kioskExitDialog.open()
+        exitPassword.forceActiveFocus()
     }
 }

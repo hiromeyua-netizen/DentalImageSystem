@@ -22,17 +22,33 @@
 // ---- Hardware ----
 static const uint8_t PWM_PIN = 2;       // IO02
 static const uint8_t PWM_CH = 0;
-// BuckPuck-style dim inputs typically behave best in the low-kHz range.
-// Very high PWM can reduce effective dim range on some drivers.
-static const uint32_t PWM_FREQ = 1000;  // 1 kHz
+// Per schematic design note: 5 kHz PWM into dimming front-end.
+static const uint32_t PWM_FREQ = 5000;  // 5 kHz
 static const uint8_t PWM_RES_BITS = 10; // 0..1023, sufficient for smooth dimming
 // Hardware polarity: true for active-low LED driver input (inverted brightness response).
 static const bool PWM_ACTIVE_LOW = true;
+// Some drivers achieve true OFF only when control pin is high-impedance (released),
+// letting an external pull-up define the OFF level.
+static const bool OFF_USES_HIZ = false;
+// Effective dimming span from client validation:
+// user 0..55 changes, above that saturates (full-on region).
+// Map user 1..100 into 1..55 to keep slider meaningful end-to-end.
+static const uint8_t EFFECTIVE_DIM_MAX_PCT = 55;
 
 // ---- State ----
 static uint8_t g_brightnessPct = 0;      // 0..100 currently applied
 static uint8_t g_lastNonZeroPct = 100;   // used by ON
 static String g_line;
+static bool g_pwmAttached = false;
+
+static uint8_t mapUserPctToDrivePct(uint8_t userPct) {
+  if (userPct <= 0) return 0;
+  if (userPct >= 100) return EFFECTIVE_DIM_MAX_PCT;
+  long v = map((long)userPct, 1L, 100L, 1L, (long)EFFECTIVE_DIM_MAX_PCT);
+  if (v < 1) v = 1;
+  if (v > EFFECTIVE_DIM_MAX_PCT) v = EFFECTIVE_DIM_MAX_PCT;
+  return (uint8_t)v;
+}
 
 static uint32_t pctToDuty(uint8_t pct) {
   const uint32_t maxDuty = (1UL << PWM_RES_BITS) - 1UL;
@@ -55,7 +71,37 @@ static void applyBrightness(uint8_t pct) {
   if (pct > 100) pct = 100;
   g_brightnessPct = pct;
   if (pct > 0) g_lastNonZeroPct = pct;
-  ledcWrite(PWM_CH, pctToDuty(pct));
+
+  // Force hard logic levels at endpoints to guarantee true OFF / MAX.
+  // Some LED drivers do not fully extinguish at PWM endpoint duty alone.
+  if (pct == 0 || pct == 100) {
+    if (g_pwmAttached) {
+      ledcDetachPin(PWM_PIN);
+      g_pwmAttached = false;
+    }
+    if (pct == 0) {
+      // OFF level: optionally release pin (Hi-Z) for true driver shutdown.
+      if (OFF_USES_HIZ) {
+        pinMode(PWM_PIN, INPUT);
+      } else {
+        pinMode(PWM_PIN, OUTPUT);
+        digitalWrite(PWM_PIN, PWM_ACTIVE_LOW ? HIGH : LOW);
+      }
+    } else { // pct == 100
+      // MAX level depends on active polarity.
+      pinMode(PWM_PIN, OUTPUT);
+      digitalWrite(PWM_PIN, PWM_ACTIVE_LOW ? LOW : HIGH);
+    }
+    return;
+  }
+
+  // Mid-range uses PWM dimming.
+  if (!g_pwmAttached) {
+    ledcAttachPin(PWM_PIN, PWM_CH);
+    g_pwmAttached = true;
+  }
+  const uint8_t drivePct = mapUserPctToDrivePct(pct);
+  ledcWrite(PWM_CH, pctToDuty(drivePct));
 }
 
 static void printStatus() {
@@ -145,6 +191,7 @@ void setup() {
 
   ledcSetup(PWM_CH, PWM_FREQ, PWM_RES_BITS);
   ledcAttachPin(PWM_PIN, PWM_CH);
+  g_pwmAttached = true;
   applyBrightness(0); // safe startup: LEDs off
 
   Serial.println("READY:ESP32_LED_CTRL");

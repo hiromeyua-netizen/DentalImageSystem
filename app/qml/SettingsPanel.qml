@@ -176,6 +176,54 @@ Rectangle {
 
             RowLayout {
                 Layout.fillWidth: true
+                Layout.bottomMargin: 10
+                Text {
+                    text: "Patient ID"
+                    font.pixelSize: 13
+                    color: Qt.rgba(1, 1, 1, 0.90)
+                }
+                Item { Layout.fillWidth: true }
+                Rectangle {
+                    Layout.preferredWidth: 170
+                    Layout.preferredHeight: 32
+                    radius: 8
+                    color: Qt.rgba(0, 0, 0, 0.18)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.24)
+
+                    TextInput {
+                        id: patientIdInput
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        verticalAlignment: TextInput.AlignVCenter
+                        color: "#ffffff"
+                        font.pixelSize: 13
+                        clip: true
+                        selectByMouse: true
+                        text: bridge.patientId
+                        onEditingFinished: bridge.onPatientIdChanged(text)
+                    }
+
+                    Connections {
+                        target: bridge
+                        function onPatientIdChanged(v) {
+                            if (!patientIdInput.activeFocus)
+                                patientIdInput.text = v
+                        }
+                    }
+                }
+            }
+
+            SettingsToggleRow {
+                label: "Use Last Patient ID"
+                active: bridge.useLastPatientId
+                onToggled: (v) => bridge.onUseLastPatientId(v)
+                Layout.bottomMargin: 18
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
                 spacing: 10
                 Layout.bottomMargin: 14
                 SettingsPillButton {

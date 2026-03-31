@@ -33,10 +33,18 @@ def main():
     engine.rootContext().setContextProperty("bridge", bridge)
     engine.rootContext().setContextProperty("cameraService", camera_service)
     bridge.powerClicked.connect(camera_service.toggle_connection)
+    bridge.appExitRequested.connect(app.quit)
     engine.load(QUrl.fromLocalFile(str(ROOT / "qml" / "main.qml")))
 
     if not engine.rootObjects():
         return 1
+
+    # Kiosk default: full-screen to hide desktop chrome.
+    try:
+        root = engine.rootObjects()[0]
+        root.showFullScreen()
+    except Exception:
+        pass
 
     camera_service.refresh_detection()
     camera_service.auto_connect_if_available()

@@ -1,0 +1,108 @@
+Statement of Work (SOW) for Software Development
+Project Overview 
+Develop custom control software for a digital medical imaging system tailored for dental procedures. The system integrates a Basler acA4024-29uc USB 3.0 camera (12MP Sony IMX226 sensor, 31 fps, color, rolling shutter), Computar M6Z1212-3S manual parfocal zoom lens (12.5-75mm, C-mount), custom ESP32-based PCB for LED control (4x 6500K LEDs via BuckPuck driver), and Geekom A6 of Beelink SER8/9 mini PC (Windows 11). Software will handle camera acquisition, LED sync, digital zoom/ROI, presets for dental workflows, simple GUI, and screenshot image saving. Reference similar dental imaging software (e.g., VisionX, Planmeca Romexis, VistaSoft) for intuitive UI and workflow efficiency.
+Scope
+Use Basler pylon SDK (Python wrapper) for camera control.
+Serial communication to ESP32 PCB for LED dimming (0-100% PWM).
+Full-screen kiosk mode to bypass Windows UI (logo boot-up splash screen)
+Focus on dentist usability: Touch-friendly GUI, presets for wide full mouth to tight single tooth views.
+Exclude: AI diagnostics, advanced editing (keep simple).
+Deliverables
+Source code (Python 3.10+, with dependencies: basler-pypylon, pyserial, opencv-python, tkinter or PyQt for GUI).
+Executable installer for Windows 11 (e.g., via pyinstaller).
+User manual (PDF) with setup, workflows, and troubleshooting.
+Test report validating features on hardware.
+Assumptions/Risks
+Risk: SDK compatibility—mitigate with pylon documentation (docs.baslerweb.com).
+https://www.baslerweb.com/en-us/software
+Requirements and Functionality Document
+Functional Requirements
+1.Camera Initialization and Control
+oAuto-detect/connect Basler acA4024-29uc via USB 3.0 (use pypylon.grab_camera()) with disconnect (CONNECTED/DISCONNECTED) button. 
+oSet defaults: Full resolution (4024x3036), Bayer RG8 format, exposure 10ms, gain 1.0.
+oReal-time preview main full screen: Stream at 15-30 fps in GUI window (use OpenCV for display).
+oManual IMAGE SETTINGS adjustments: Sliders for exposure (0.001-0.1s), gain (0-24 dB), white balance, contrast, saturation, warmth, tint, etc
+
+2.Zoom and ROI Workflow
+oSupport manual parfocal lens: No motorized control; user adjusts physically.
+oDigital zoom: 1x-10x via software cropping/upsampling (bicubic interpolation in OpenCV). Zoom preset slider. Also touch (2 finger pinch zoom in/out and 1 finer pan). CENTER button to recenter at the current zoom level. 
+oROI MODE button (image grays out) + box selection: click ROI MODE then one finger diagonal box to define region (e.g., 1/4 sensor for tight tooth view); Lifting finger auto-centers and zooms to area. 
+o2 finger pinch zoom in/out and 1 finger pan.
+
+3.LED Control and Sync
+oConnect to ESP32 via serial (COM port, 115200 baud).
+oCommands: "DIM:X\n" (X=0-100% brightness), "ON\n", "OFF\n", "STATUS\n".
+oSync: Ramp LEDs to preset level before capture (0-100% or AUTO)
+oAuto-off after idle (X minutes without video feed activity).
+oGUI: Slider (OFF to 100%) and OFF/HIGH preset buttons (OFF icon -slider- HIGH icon) for manual override. 
+oSubtle indicator button touch sound. 
+
+4.Capture and Saving
+oScreenshot/capture: CAPTURE button to grab frame.
+oSaving methods:
+Set to PC local: Save to folder (e.g., C:\DentalImages) as PNG/JPEG; auto-name with date/timestamp/Patient ID (prompt for new name, option for last)
+Set to SD card: Export via Windows file explorer to inserted reader (prompt user); or auto-copy if detected. Warning at full. 
+Other easy: Network share (e.g., clinic server), cloud upload (e.g., OneDrive integration), DICOM export for compatibility with dental software (use pydicom library).
+oBatch save: Option to capture sequence with amount and time interval (various seconds interval) for procedures.
+oCamera sound with each capture; Option to turn off.  
+
+5.Presets for Dental Workflow (3 buttons easily accessible – bottom right) 
+oGUI buttons to switch presets; auto-apply camera/LED settings.
+oCustom presets: Allow dentist to save current LED brightness and zoom with long press, confirmed with a sound. Single press to implement preset. 
+
+6.GUI and Usability
+oSimple, touch-friendly: Medium sized buttons/icons, minimal text (e.g., PyQt for responsive design).
+oLayout: Main preview window (80% screen), sidebars with sliders/buttons (presets, capture, save, LED).
+oKiosk mode: Launch full-screen, hide taskbar (use Windows Assigned Access or Qt full-screen flags); Shut down via password (e.g., "admin").
+oEase for dentists: One-click workflows, tooltips, potentially multi-language support (English default).
+Non-Functional Requirements
+Performance: <100ms latency for preview/capture; handle 31 fps max.
+Compatibility: Windows 11 on Geekom A6/Beelink SER8/9; USB 3.0 for camera.
+Security: Password-protect settings; encrypt saved images if DICOM for HIPAA.
+Reliability: Error handling (e.g., camera disconnect → retry); auto-reconnect to PCB.
+Usability: Intuitive for non-tech users; test with dentists for feedback.
+Compliance: Align with medical imaging standards (e.g., DICOM for export); low-noise processing to match camera's dynamic range.
+
+
+
+
+
+Our system uses the Elo 1502LM (15.6-inch medical-grade touchscreen monitor, variants like E542617 black with stand, E542808 white with stand, or E967255 no-stand white). This is the current standard 15" medical Elo model (updated from older 15xxL series like 1519LM/1528L). It features:
+
+Resolution: Native Full HD 1920 × 1080 (16:9 aspect ratio).
+Touch Technology: TouchPro® Projected Capacitive (PCAP) with 10-point multi-touch, supports finger, wet/dry gloved hands, and stylus.
+Brightness: ~225–250 nits (panel 250 nits typical; slightly reduced with touch overlay).
+Contrast Ratio: High typical viewing angles (±80° horizontal/vertical).
+Surface: Anti-glare, zero-bezel design for clean aesthetics and reduced reflections in clinical lighting.
+Sealing & Compliance: IP-22 rated (sealed against dirt, dust, and liquids for easy sanitizing with disinfectants); IEC 60601-1 compliant power supply (medical electrical safety, low leakage current); not FDA-cleared as a "medical device" itself but suitable for integration in compliant systems.
+Inputs: HDMI, VGA, USB-C (for video/power/data), multiple USB ports (including Micro-USB and USB-C variants).
+Other: Built-in dual 2W speakers (useful for future audio cues); VESA mount compatible (75×75 or 100×100 mm patterns for our cart/arm setup); 3-year warranty standard.
+
+Key Software Design Considerations
+
+Resolution & Scaling:
+Target 1920×1080 as primary/full-screen resolution for kiosk mode—matches native for sharpest image preview from the Basler camera (which outputs higher-res images but will be scaled/downsampled for display).
+Use DPI-aware scaling (Windows high-DPI support) to ensure UI elements remain crisp on this smaller 15.6" screen (avoid tiny text/buttons for touch usability).
+For live preview: Scale Basler frames (e.g., 4024×3036) to fit 1920×1080 viewport with aspect preservation (letterbox or crop intelligently); use bicubic interpolation in OpenCV for smooth digital zoom/ROI views.
+
+Touch Optimization (Critical for Dentist Workflow):
+Design for gloved/wet touch reliability—PCAP excels here, so prioritize large touch targets (minimum 48×48 dp for buttons/sliders per accessibility guidelines).
+Support 10-point multi-touch for gestures: pinch-to-zoom (digital zoom on preview), drag for ROI selection, swipe for preset switching.
+Kiosk/full-screen mode: Hide Windows taskbar/start menu; use Qt or Tkinter full-screen flags; implement password-protected exit (e.g., long-press corner or gesture).
+Touch calibration: Recommend initial Windows calibration (via Control Panel) during setup; software can detect touch events accurately without custom drivers.
+
+Display & Image Quality for Medical Imaging:
+Anti-glare surface reduces reflections in operatory lighting—position preview to maximize clarity.
+No built-in DICOM calibration (unlike larger Elo 03-series like 2403LM), so do not rely on monitor for diagnostic-grade grayscale; our software should handle basic contrast/brightness adjustments and export DICOM if needed (via pydicom).
+Color accuracy: Good for general dental viewing (wide viewing angles); test preview with 6500K LED illumination to match camera white balance.
+Brightness/contrast controls: Expose software sliders if needed but rely on monitor OSD (on-screen display) buttons for hardware tweaks (accessible via bottom-edge controls).
+
+Power & Connectivity Integration:
+Connect via HDMI (preferred) or USB-C from Mini PC for video; ensure USB hub routes touch data (USB controller).
+Power: IEC 60601-compliant adapter included—low EMI/ripple helps maintain clean imaging signals.
+Mounting: VESA-compatible for our articulated arm/cart—ensure software orientation matches physical setup (landscape default; add portrait toggle if useful).
+
+Usability & Workflow Tips:
+Large, intuitive GUI elements (e.g., big preset buttons for "Wide Zoom" vs. "Tight Zoom")—dentists often wear gloves and need quick, REPEATED, one-handed operation.
+Testing: Validate on actual 1502LM hardware for touch latency (<50ms ideal), multi-touch gestures, and gloved performance in dental sim (wet gloves from procedures).
+Edge cases: Handle monitor sleep/power-on (auto-resume preview); detect disconnect/reconnect gracefully.
