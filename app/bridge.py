@@ -729,8 +729,6 @@ class DentalBridge(QObject):
         self._flip_v = _b("flipVertical", self._flip_v, self.flipVerticalChanged)
         self._rotate_q = _i("rotateQuarterTurns", 0, 3, self._rotate_q, self.rotateQuarterTurnsChanged)
 
-        self._auto_color = _b("autoColor", self._auto_color, self.autoColorChanged)
-
         # Image settings (0–100, 50 neutral)
         self._exposure = _i("exposure", 0, 100, self._exposure, self.exposureChanged)
         self._gain = _i("gain", 0, 100, self._gain, self.gainChanged)
@@ -743,6 +741,7 @@ class DentalBridge(QObject):
         # Capture prefs
         self._capture_format_png = _b("captureFormatPng", self._capture_format_png, self.captureFormatPngChanged)
         self._image_quality = _i("imageQuality", 1, 100, self._image_quality, self.imageQualityChanged)
+        self._auto_color = _b("autoColor", self._auto_color, self.autoColorChanged)
 
     @pyqtSlot(bool)
     def onAutoColorToggled(self, v):

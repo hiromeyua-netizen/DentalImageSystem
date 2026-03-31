@@ -38,13 +38,17 @@ except Exception:  # pragma: no cover - optional env without pypylon
 try:
     from dental_imaging.image_processing.color_adjustments import (
         ImageSettingsPercent,
+        apply_auto_color_balance,
         apply_software_image_adjustments,
+        compute_auto_color_gains,
     )
 
     _HAS_COLOR_ADJ = True
 except Exception:  # pragma: no cover
     ImageSettingsPercent = None  # type: ignore[assignment,misc]
     apply_software_image_adjustments = None  # type: ignore[assignment,misc]
+    apply_auto_color_balance = None  # type: ignore[assignment,misc]
+    compute_auto_color_gains = None  # type: ignore[assignment,misc]
     _HAS_COLOR_ADJ = False
 
 try:
@@ -120,7 +124,7 @@ class CameraService(QObject):
         self._bridge.patientIdChanged.connect(self._on_patient_id_changed)
         self._bridge.useLastPatientIdChanged.connect(self._on_use_last_patient_changed)
         self._bridge.autoColorChanged.connect(self._on_bridge_auto_color_changed)
-        self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        self._auto_color_gains = np.ones(3, dtype=np.float32)
 
     # ── Storage target routing (SYSTEM / SD CARD) ───────────────────────────
     def _detect_sd_capture_dir(self) -> Optional[Path]:
@@ -342,7 +346,6 @@ class CameraService(QObject):
 
     def _preset_snapshot_from_bridge(self) -> dict:
         return {
-            "autoColor": bool(self._bridge.autoColor),
             "brightness": int(self._bridge.brightness),
             "zoom": int(self._bridge.zoom),
             "previewPanX": float(self._bridge.previewPanX),
@@ -359,6 +362,7 @@ class CameraService(QObject):
             "tint": int(self._bridge.tint),
             "captureFormatPng": bool(self._bridge.captureFormatPng),
             "imageQuality": int(self._bridge.imageQuality),
+            "autoColor": bool(self._bridge.autoColor),
         }
 
     @pyqtSlot(int)
@@ -518,57 +522,6 @@ class CameraService(QObject):
             tint=int(self._bridge.tint),
         )
 
-    def _on_bridge_auto_color_changed(self, enabled: bool) -> None:
-        if not enabled:
-            self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
-
-    @staticmethod
-    def _compute_auto_color_gains(bgr: np.ndarray) -> np.ndarray:
-        """Gray-world BGR gains from central ROI; clip luminance percentiles for stability."""
-        if bgr is None or bgr.size == 0:
-            return np.array([1.0, 1.0, 1.0], dtype=np.float32)
-        h, w = bgr.shape[:2]
-        y0, y1 = int(h * 0.15), int(h * 0.85)
-        x0, x1 = int(w * 0.15), int(w * 0.85)
-        crop = bgr[y0:y1, x0:x1]
-        if crop is None or crop.size < 500:
-            crop = bgr
-        px = crop.reshape(-1, 3).astype(np.float32)
-        if px.shape[0] < 50:
-            return np.array([1.0, 1.0, 1.0], dtype=np.float32)
-
-        luma = 0.114 * px[:, 0] + 0.587 * px[:, 1] + 0.299 * px[:, 2]
-        lo, hi = np.percentile(luma, [5, 95])
-        mask = (luma >= lo) & (luma <= hi)
-        if int(mask.sum()) >= 50:
-            px = px[mask]
-
-        means = np.maximum(px.mean(axis=0), 1.0)
-        target = float(np.mean(means))
-        gains = target / means
-        gains = np.clip(gains, 0.70, 1.40)
-        return gains.astype(np.float32)
-
-    def _update_auto_color_gains_from_frame(self, bgr: np.ndarray) -> None:
-        target = self._compute_auto_color_gains(bgr)
-        self._auto_color_gains = (
-            0.8 * self._auto_color_gains + 0.2 * target
-        ).astype(np.float32)
-
-    def _apply_auto_color_balance(self, bgr: np.ndarray) -> np.ndarray:
-        if bgr is None or bgr.size == 0:
-            return bgr
-        if not bool(self._bridge.autoColor):
-            return bgr
-        gains = self._auto_color_gains
-        if gains is None or np.allclose(gains, 1.0, atol=1e-3):
-            return bgr
-        f = bgr.astype(np.float32)
-        f[:, :, 0] *= float(gains[0])
-        f[:, :, 1] *= float(gains[1])
-        f[:, :, 2] *= float(gains[2])
-        return np.clip(f, 0, 255).astype(np.uint8)
-
     def _apply_software_image_adjustments(self, frame: np.ndarray) -> np.ndarray:
         if (
             not _HAS_COLOR_ADJ
@@ -582,6 +535,30 @@ class CameraService(QObject):
             return apply_software_image_adjustments(
                 frame, self._bridge_image_settings_snapshot()
             )
+        except Exception:
+            return frame
+
+    def _on_bridge_auto_color_changed(self, _enabled: bool) -> None:
+        # Neutral gains on toggle so the next frames re-learn smoothly from scratch.
+        self._auto_color_gains = np.ones(3, dtype=np.float32)
+
+    def _apply_auto_color_stage(self, frame: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        if frame is None or frame.size == 0:
+            return frame
+        if not bool(self._bridge.autoColor):
+            return frame
+        if (
+            not _HAS_COLOR_ADJ
+            or compute_auto_color_gains is None
+            or apply_auto_color_balance is None
+        ):
+            return frame
+        try:
+            target = compute_auto_color_gains(frame)
+            self._auto_color_gains = (
+                0.8 * self._auto_color_gains + 0.2 * target
+            ).astype(np.float32)
+            return apply_auto_color_balance(frame, self._auto_color_gains)
         except Exception:
             return frame
 
@@ -627,7 +604,6 @@ class CameraService(QObject):
     @pyqtSlot()
     def on_image_settings_defaults_restored(self) -> None:
         """Reset: neutral sliders + continuous AE / AGC / AWB on the Basler."""
-        self._auto_color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
         if self._camera is None or not getattr(self._camera, "is_connected", False):
             return
         try:
@@ -647,9 +623,9 @@ class CameraService(QObject):
         if frame is None or frame.size == 0:
             return
         frame = self._apply_software_image_adjustments(frame)
-        if bool(self._bridge.autoColor):
-            self._update_auto_color_gains_from_frame(frame)
-        frame = self._apply_auto_color_balance(frame)
+        frame = self._apply_auto_color_stage(frame)
+        if frame is None or frame.size == 0:
+            return
         self._provider.update_overview(frame)
         cropped, x0, y0, cw, ch, fw, fh = zoom_crop_pan(
             frame,
@@ -747,9 +723,10 @@ class CameraService(QObject):
                 return False, ""
 
             frame = self._apply_software_image_adjustments(frame)
-            if bool(self._bridge.autoColor):
-                self._update_auto_color_gains_from_frame(frame)
-            frame = self._apply_auto_color_balance(frame)
+            frame = self._apply_auto_color_stage(frame)
+            if frame is None or frame.size == 0:
+                self._bridge.toast("Capture failed. Please try again.")
+                return False, ""
             cropped, *_ = zoom_crop_pan(
                 frame,
                 self._bridge.zoom,
