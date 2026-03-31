@@ -125,9 +125,14 @@ Item {
                 RailButton {
                     width: parent.width
                     iconSource: Qt.resolvedUrl("icons/camera.svg")
-                    tooltip: "Capture  [Space]"
+                    tooltip: bridge.burstActive
+                        ? ("Stop burst (" + bridge.burstProgressText + ")")
+                        : "Capture  [Space]"
                     opacity: bridge.capturable ? 1.0 : 0.35
                     enabled: bridge.capturable
+                    isChecked: bridge.burstActive
+                    activeColor: Qt.rgba(0.88, 0.26, 0.26, 0.35)
+                    activeBorder: Qt.rgba(1.0, 0.45, 0.45, 0.64)
                     onClicked: bridge.onCapture()
                 }
                 RailButton {

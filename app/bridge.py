@@ -36,6 +36,8 @@ class DentalBridge(QObject):
     imageQualityChanged         = pyqtSignal(int)
     ledsPresetAutoChanged       = pyqtSignal(bool)
     captureBurstModeChanged     = pyqtSignal(bool)
+    burstActiveChanged          = pyqtSignal(bool)
+    burstProgressTextChanged    = pyqtSignal(str)
     captureDelaySecChanged      = pyqtSignal(int)
     cameraSoundEnabledChanged   = pyqtSignal(bool)
     storageSdcardChanged        = pyqtSignal(bool)
@@ -100,6 +102,8 @@ class DentalBridge(QObject):
         self._image_quality      = 94
         self._leds_auto          = True
         self._capture_burst      = True
+        self._burst_active       = False
+        self._burst_progress     = ""
         self._capture_delay_sec  = 10
         self._camera_sound       = False
         self._storage_sdcard     = False
@@ -190,6 +194,12 @@ class DentalBridge(QObject):
 
     @pyqtProperty(bool, notify=captureBurstModeChanged)
     def captureBurstMode(self): return self._capture_burst
+
+    @pyqtProperty(bool, notify=burstActiveChanged)
+    def burstActive(self): return self._burst_active
+
+    @pyqtProperty(str, notify=burstProgressTextChanged)
+    def burstProgressText(self): return self._burst_progress
 
     @pyqtProperty(int,  notify=captureDelaySecChanged)
     def captureDelaySec(self): return self._capture_delay_sec
@@ -287,6 +297,16 @@ class DentalBridge(QObject):
         if self._capturable != v:
             self._capturable = v
             self.capturableChanged.emit(v)
+
+    def set_burst_state(self, active: bool, progress_text: str = "") -> None:
+        active = bool(active)
+        progress_text = str(progress_text or "")
+        if self._burst_active != active:
+            self._burst_active = active
+            self.burstActiveChanged.emit(active)
+        if self._burst_progress != progress_text:
+            self._burst_progress = progress_text
+            self.burstProgressTextChanged.emit(progress_text)
 
     def set_brightness(self, v):
         v = max(0, min(100, v))

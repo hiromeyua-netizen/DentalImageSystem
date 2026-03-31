@@ -60,6 +60,7 @@ GAIN_MAX = 20.0
 
 # Nominal stream rate (UI + timer; matches product reference / camera config).
 TARGET_FPS = 31
+BURST_DEFAULT_COUNT = 10
 
 
 class CameraService(QObject):
@@ -72,6 +73,13 @@ class CameraService(QObject):
         self._camera: Any = None
         self._detected: List[Any] = []
         self._capture_in_progress = False
+        self._burst_timer = QTimer(self)
+        self._burst_timer.setSingleShot(True)
+        self._burst_timer.timeout.connect(self._on_burst_tick)
+        self._burst_active = False
+        self._burst_stop_requested = False
+        self._burst_index = 0
+        self._burst_total = BURST_DEFAULT_COUNT
         self._timer = QTimer(self)
         self._timer.setInterval(max(16, int(round(1000 / TARGET_FPS))))
         self._timer.timeout.connect(self._on_frame_tick)
@@ -264,6 +272,7 @@ class CameraService(QObject):
             pass
 
     def _disconnect(self) -> None:
+        self._stop_burst_internal(silent=True)
         self._timer.stop()
         if self._camera is not None:
             try:
@@ -398,7 +407,11 @@ class CameraService(QObject):
 
     @pyqtSlot()
     def on_capture_requested(self) -> None:
-        """Capture current view, apply active image settings, and save to disk."""
+        """Capture one image, or toggle burst start/stop based on current mode."""
+        if self._burst_active:
+            self._burst_stop_requested = True
+            self._bridge.toast("Stopping burst…")
+            return
         if self._capture_in_progress:
             return
         if self._camera is None or not getattr(self._camera, "is_connected", False):
@@ -408,12 +421,21 @@ class CameraService(QObject):
             self._bridge.toast("Capture storage is unavailable in this build.")
             return
 
+        if bool(self._bridge.captureBurstMode):
+            self._start_burst_capture()
+            return
+
+        ok, result_name = self._capture_and_save(prefix="capture", emit_saved_signal=True)
+        if ok and result_name:
+            self._bridge.toast(f"Saved: {result_name}")
+
+    def _capture_and_save(self, *, prefix: str, emit_saved_signal: bool) -> tuple[bool, str]:
         self._capture_in_progress = True
         try:
             frame = self._camera.grab_still_frame()
             if frame is None or frame.size == 0:
                 self._bridge.toast("Capture failed. Please try again.")
-                return
+                return False, ""
 
             frame = self._apply_software_image_adjustments(frame)
             cropped, *_ = zoom_crop_pan(
@@ -424,7 +446,7 @@ class CameraService(QObject):
             )
             if cropped is None or cropped.size == 0:
                 self._bridge.toast("Capture failed. Please try again.")
-                return
+                return False, ""
             out = apply_view_transforms(
                 cropped,
                 flip_h=self._bridge.flipHorizontal,
@@ -433,22 +455,69 @@ class CameraService(QObject):
             )
             if out is None or out.size == 0:
                 self._bridge.toast("Capture failed. Please try again.")
-                return
+                return False, ""
 
             fmt = "png" if bool(self._bridge.captureFormatPng) else "jpg"
             self._snapshot_writer.set_image_format(fmt)
             self._snapshot_writer.set_jpeg_quality(int(self._bridge.imageQuality))
-            result = self._snapshot_writer.save_bgr(out, prefix="capture")
-            self._bridge.toast(f"Saved: {result.path.name}")
-            try:
-                self._bridge.captureSaved.emit(str(result.path), int(result.width), int(result.height))
-            except Exception:
-                pass
+            result = self._snapshot_writer.save_bgr(out, prefix=prefix)
+            if emit_saved_signal:
+                try:
+                    self._bridge.captureSaved.emit(str(result.path), int(result.width), int(result.height))
+                except Exception:
+                    pass
+            return True, result.path.name
         except Exception as exc:
             self._bridge.toast(f"Capture failed: {exc}")
             try:
                 self._bridge.captureFailed.emit(str(exc))
             except Exception:
                 pass
+            return False, ""
         finally:
             self._capture_in_progress = False
+
+    def _start_burst_capture(self) -> None:
+        self._burst_active = True
+        self._burst_stop_requested = False
+        self._burst_index = 0
+        self._burst_total = BURST_DEFAULT_COUNT
+        self._bridge.set_burst_state(True, f"Burst 0/{self._burst_total}")
+        self._bridge.toast("Burst started. Tap capture again to stop.")
+        self._burst_timer.start(0)
+
+    def _stop_burst_internal(self, *, silent: bool = False) -> None:
+        if not self._burst_active:
+            self._bridge.set_burst_state(False, "")
+            return
+        self._burst_timer.stop()
+        captured = self._burst_index
+        self._burst_active = False
+        self._burst_stop_requested = False
+        self._bridge.set_burst_state(False, "")
+        if not silent:
+            self._bridge.toast(f"Burst stopped ({captured} captured)")
+
+    def _on_burst_tick(self) -> None:
+        if not self._burst_active:
+            return
+        if self._burst_stop_requested:
+            self._stop_burst_internal(silent=False)
+            return
+        if self._camera is None or not getattr(self._camera, "is_connected", False):
+            self._stop_burst_internal(silent=True)
+            self._bridge.toast("Burst stopped (camera disconnected)")
+            return
+
+        next_idx = self._burst_index + 1
+        ok, _ = self._capture_and_save(prefix=f"burst_{next_idx:02d}", emit_saved_signal=False)
+        if ok:
+            self._burst_index = next_idx
+        self._bridge.set_burst_state(True, f"Burst {self._burst_index}/{self._burst_total}")
+
+        if self._burst_stop_requested or self._burst_index >= self._burst_total:
+            self._stop_burst_internal(silent=False)
+            return
+
+        interval_ms = max(200, int(self._bridge.captureDelaySec) * 1000)
+        self._burst_timer.start(interval_ms)
