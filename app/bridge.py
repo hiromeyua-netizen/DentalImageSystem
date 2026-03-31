@@ -729,6 +729,8 @@ class DentalBridge(QObject):
         self._flip_v = _b("flipVertical", self._flip_v, self.flipVerticalChanged)
         self._rotate_q = _i("rotateQuarterTurns", 0, 3, self._rotate_q, self.rotateQuarterTurnsChanged)
 
+        self._auto_color = _b("autoColor", self._auto_color, self.autoColorChanged)
+
         # Image settings (0–100, 50 neutral)
         self._exposure = _i("exposure", 0, 100, self._exposure, self.exposureChanged)
         self._gain = _i("gain", 0, 100, self._gain, self.gainChanged)
