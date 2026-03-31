@@ -65,11 +65,9 @@ dental_image_system/
 ├── app/                 # Kiosk UI (PyQt6 + QML) and ``camera_core/`` (Basler + snapshot)
 ├── config/              # Configuration files
 ├── firmware/            # ESP32 LED controller (Arduino)
+├── logs/                # Runtime logs (if used)
 ├── kiosk_main.py        # Console entry that runs ``app/main.py``
-├── resources/           # Optional assets
-├── tests/               # Test suite
-├── docs/                # Documentation
-└── scripts/             # Utility scripts
+└── project_requirements.txt
 ```
 
 ## Configuration

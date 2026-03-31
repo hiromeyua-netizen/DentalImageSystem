@@ -39,22 +39,11 @@ line-length = 100
 target-version = ['py310']
 include = '\.pyi?$'
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["app"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
-
-[tool.coverage.run]
-source = ["app"]
-omit = ["*/tests/*", "*/test_*.py"]
 
 [tool.setuptools]
 py-modules = ["kiosk_main"]
