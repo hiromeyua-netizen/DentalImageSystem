@@ -47,7 +47,7 @@ class SerialService(QObject):
         self._last_dim_sent = -1
         self._pending_dim = -1
         self._has_announced_missing = False
-        self._announced_connected_port = ""
+        self._was_connected = False
         self._last_status_ok_t = 0.0
 
         self._bridge.brightnessChanged.connect(self._on_bridge_brightness_changed)
@@ -70,6 +70,7 @@ class SerialService(QObject):
         self._close()
 
     def _close(self) -> None:
+        was_connected = self._was_connected
         if self._ser is not None:
             try:
                 self._ser.close()
@@ -79,7 +80,10 @@ class SerialService(QObject):
         self._last_status_ok_t = 0.0
         self._last_dim_sent = -1
         self._port_name = ""
+        self._was_connected = False
         self._bridge.set_led_controller_state(False, "")
+        if was_connected:
+            self._bridge.toast("LED controller disconnected.")
 
     def _ensure_connected(self) -> None:
         if self._ser is not None:
@@ -140,10 +144,9 @@ class SerialService(QObject):
                 return
             self._ser = s
             self._port_name = port
+            self._was_connected = True
             self._bridge.set_led_controller_state(True, port)
-            if self._announced_connected_port != port:
-                self._bridge.toast(f"LED controller connected ({port})")
-                self._announced_connected_port = port
+            self._bridge.toast(f"LED controller connected ({port})")
             # Sync current slider value immediately.
             self._send_dim(int(self._bridge.brightness), force=True)
         except Exception:
