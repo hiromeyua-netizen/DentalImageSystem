@@ -128,6 +128,7 @@ class DentalBridge(QObject):
         self._capture_items      = []
         self._capture_preview_index = -1
         self._captures_dir       = Path(__file__).resolve().parent.parent / "captures"
+        self._restore_settings_after_preview = False
 
     # ── QML-readable properties ───────────────────────────────────────────────
     @pyqtProperty(bool, notify=connectedChanged)
@@ -780,6 +781,11 @@ class DentalBridge(QObject):
         if not self._capture_items:
             self.toast("No captured images found")
             return
+        # Capture Preview takes focus; remember whether settings was open.
+        self._restore_settings_after_preview = bool(self._settings_panel_vis)
+        if self._settings_panel_vis:
+            self._settings_panel_vis = False
+            self.settingsPanelVisibleChanged.emit(False)
         if not self._capture_preview_visible:
             self._capture_preview_visible = True
             self.capturePreviewVisibleChanged.emit(True)
@@ -789,6 +795,10 @@ class DentalBridge(QObject):
         if self._capture_preview_visible:
             self._capture_preview_visible = False
             self.capturePreviewVisibleChanged.emit(False)
+        if self._restore_settings_after_preview and not self._settings_panel_vis:
+            self._settings_panel_vis = True
+            self.settingsPanelVisibleChanged.emit(True)
+        self._restore_settings_after_preview = False
 
     @pyqtSlot()
     def onCapturePreviewRefresh(self):
