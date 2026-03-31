@@ -18,10 +18,10 @@ Popup {
     readonly property var selectedItem: (sel >= 0 && sel < items.length) ? items[sel] : null
 
     background: Rectangle {
-        radius: 16
-        color: Qt.rgba(0.86, 0.67, 0.68, 0.78)
+        radius: 20
+        color: Qt.rgba(0.06, 0.06, 0.08, 0.42)
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.35)
+        border.color: Qt.rgba(1, 1, 1, 0.28)
     }
 
     contentItem: Item {
@@ -40,10 +40,17 @@ Popup {
 
                 Text {
                     text: "Capture Preview"
-                    font.pixelSize: 28
+                    font.pixelSize: 22
                     font.bold: true
                     color: "#ffffff"
-                    Layout.bottomMargin: 8
+                    Layout.bottomMargin: 6
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: Qt.rgba(1, 1, 1, 0.16)
+                    Layout.bottomMargin: 6
                 }
 
                 Rectangle {
@@ -52,7 +59,7 @@ Popup {
                     radius: 14
                     color: Qt.rgba(0, 0, 0, 0.18)
                     border.width: 1
-                    border.color: Qt.rgba(1, 1, 1, 0.22)
+                    border.color: Qt.rgba(1, 1, 1, 0.28)
                     clip: true
 
                     Image {
@@ -67,7 +74,7 @@ Popup {
                 Text {
                     Layout.fillWidth: true
                     text: root.selectedItem ? root.selectedItem.name : "No image selected"
-                    font.pixelSize: 20
+                    font.pixelSize: 18
                     font.bold: true
                     color: "#ffffff"
                     elide: Text.ElideRight
@@ -75,8 +82,8 @@ Popup {
                 Text {
                     Layout.fillWidth: true
                     text: root.selectedItem ? root.selectedItem.datetime : ""
-                    font.pixelSize: 16
-                    color: Qt.rgba(1, 1, 1, 0.88)
+                    font.pixelSize: 13
+                    color: Qt.rgba(1, 1, 1, 0.75)
                 }
 
                 RowLayout {
@@ -86,12 +93,40 @@ Popup {
                         text: "Previous"
                         enabled: bridge.capturePreviewIndex > 0
                         onClicked: bridge.onCapturePreviewPrevious()
+                        background: Rectangle {
+                            radius: 14
+                            color: parent.enabled ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.04)
+                            border.width: 1
+                            border.color: Qt.rgba(1, 1, 1, 0.30)
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.enabled ? "#ffffff" : Qt.rgba(1, 1, 1, 0.45)
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 13
+                            font.weight: Font.Medium
+                        }
                     }
                     Button {
                         text: "Next"
                         enabled: bridge.capturePreviewIndex >= 0
                                  && bridge.capturePreviewIndex < bridge.captureItems.length - 1
                         onClicked: bridge.onCapturePreviewNext()
+                        background: Rectangle {
+                            radius: 14
+                            color: parent.enabled ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.04)
+                            border.width: 1
+                            border.color: Qt.rgba(1, 1, 1, 0.30)
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.enabled ? "#ffffff" : Qt.rgba(1, 1, 1, 0.45)
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 13
+                            font.weight: Font.Medium
+                        }
                     }
                 }
             }
@@ -101,9 +136,9 @@ Popup {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: 14
-                color: Qt.rgba(0, 0, 0, 0.10)
+                color: Qt.rgba(0, 0, 0, 0.16)
                 border.width: 1
-                border.color: Qt.rgba(1, 1, 1, 0.16)
+                border.color: Qt.rgba(1, 1, 1, 0.24)
                 clip: true
 
                 Flickable {
@@ -128,11 +163,11 @@ Popup {
                                 width: Math.floor((grid.width - grid.spacing * (grid.columns - 1)) / grid.columns)
                                 height: Math.round(width * 0.72)
                                 radius: 8
-                                color: Qt.rgba(1, 1, 1, 0.10)
+                                color: Qt.rgba(1, 1, 1, 0.08)
                                 border.width: bridge.capturePreviewIndex === index ? 2 : 1
                                 border.color: bridge.capturePreviewIndex === index
                                     ? Qt.rgba(1, 1, 1, 0.95)
-                                    : Qt.rgba(1, 1, 1, 0.22)
+                                    : Qt.rgba(1, 1, 1, 0.26)
 
                                 Image {
                                     anchors.fill: parent
@@ -158,7 +193,21 @@ Popup {
             anchors.right: parent.right
             anchors.top: parent.top
             text: "✕"
-            font.pixelSize: 20
+            font.pixelSize: 18
+            background: Rectangle {
+                radius: 12
+                color: parent.hovered ? Qt.rgba(1, 1, 1, 0.10) : "transparent"
+                border.width: parent.hovered ? 1 : 0
+                border.color: Qt.rgba(1, 1, 1, 0.24)
+            }
+            contentItem: Text {
+                text: parent.text
+                color: Qt.rgba(1, 1, 1, 0.86)
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.pixelSize: 18
+                font.bold: true
+            }
             onClicked: bridge.onCapturePreviewClose()
         }
     }
