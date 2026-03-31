@@ -358,6 +358,11 @@ ApplicationWindow {
             if (v) capturePreviewModal.open()
             else capturePreviewModal.close()
         }
+        function onAppExitRequested() {
+            kioskLock = false
+            kioskExitDialog.close()
+            Qt.quit()
+        }
     }
 
     Item {

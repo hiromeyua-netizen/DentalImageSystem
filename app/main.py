@@ -33,7 +33,6 @@ def main():
     engine.rootContext().setContextProperty("bridge", bridge)
     engine.rootContext().setContextProperty("cameraService", camera_service)
     bridge.powerClicked.connect(camera_service.toggle_connection)
-    bridge.appExitRequested.connect(app.quit)
     engine.load(QUrl.fromLocalFile(str(ROOT / "qml" / "main.qml")))
 
     if not engine.rootObjects():
