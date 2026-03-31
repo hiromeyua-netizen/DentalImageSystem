@@ -9,6 +9,7 @@ Protocol (115200 baud, newline-terminated):
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Optional
 
@@ -33,8 +34,12 @@ class SerialService(QObject):
         self._bridge = bridge
         self._ser = None
         self._port_name = ""
+        self._preferred_port = ""
         self._retry = QTimer(self)   # reconnect scheduler
-        self._retry.setInterval(2500)
+        self._retry_base_ms = 1200
+        self._retry_max_ms = 8000
+        self._retry_step = 0
+        self._retry.setInterval(self._retry_base_ms)
         self._retry.timeout.connect(self._ensure_connected)
         self._poll = QTimer(self)    # lightweight keepalive
         self._poll.setInterval(3000)
@@ -43,15 +48,27 @@ class SerialService(QObject):
         self._dim_flush.setSingleShot(True)
         self._dim_flush.setInterval(40)
         self._dim_flush.timeout.connect(self._flush_pending_dim)
+        self._idle_check = QTimer(self)
+        self._idle_check.setInterval(5000)
+        self._idle_check.timeout.connect(self._on_idle_check)
 
         self._last_dim_sent = -1
         self._pending_dim = -1
         self._has_announced_missing = False
         self._was_connected = False
         self._last_status_ok_t = 0.0
+        self._last_video_activity_t = time.monotonic()
+        self._idle_led_off_active = False
+        self._idle_timeout_s = max(60, int(float(os.environ.get("DENTAL_LED_IDLE_MINUTES", "5")) * 60))
+        self._last_connect_attempt_t = 0.0
+        self._connect_attempt_min_gap_s = 0.7
+        self._last_missing_status_t = 0.0
+        self._last_disconnect_toast_t = 0.0
+        self._disconnect_toast_cooldown_s = 8.0
 
         self._bridge.brightnessChanged.connect(self._on_bridge_brightness_changed)
         self._bridge.ledsPresetAutoChanged.connect(self._on_leds_preset_changed)
+        self._bridge.frameCounterChanged.connect(self._on_frame_activity)
         self._bridge.set_led_controller_state(False, "")
 
     def start(self) -> None:
@@ -64,14 +81,17 @@ class SerialService(QObject):
                 self._has_announced_missing = True
             return
         self._bridge.set_led_controller_status_text("LED controller: scanning serial ports...")
+        self._set_retry_step(0)
         self._ensure_connected()
         self._retry.start()
         self._poll.start()
+        self._idle_check.start()
 
     def stop(self) -> None:
         self._retry.stop()
         self._poll.stop()
         self._dim_flush.stop()
+        self._idle_check.stop()
         self._close()
 
     def _close(self) -> None:
@@ -86,14 +106,27 @@ class SerialService(QObject):
         self._last_dim_sent = -1
         self._port_name = ""
         self._was_connected = False
+        self._set_retry_step(min(self._retry_step + 1, 5))
         self._bridge.set_led_controller_state(False, "")
         self._bridge.set_led_controller_status_text(
             "LED controller disconnected. Retrying..."
         )
         if was_connected:
-            self._bridge.toast("LED controller disconnected.")
+            now = time.monotonic()
+            if (now - self._last_disconnect_toast_t) >= self._disconnect_toast_cooldown_s:
+                self._last_disconnect_toast_t = now
+                self._bridge.toast("LED controller disconnected.")
+
+    def _set_retry_step(self, step: int) -> None:
+        self._retry_step = max(0, int(step))
+        next_ms = min(self._retry_max_ms, self._retry_base_ms * (2 ** self._retry_step))
+        self._retry.setInterval(int(next_ms))
 
     def _ensure_connected(self) -> None:
+        now = time.monotonic()
+        if (now - self._last_connect_attempt_t) < self._connect_attempt_min_gap_s:
+            return
+        self._last_connect_attempt_t = now
         if self._ser is not None:
             try:
                 if bool(getattr(self._ser, "is_open", False)):
@@ -104,9 +137,12 @@ class SerialService(QObject):
 
         port = self._find_esp32_port()
         if not port:
-            self._bridge.set_led_controller_status_text(
-                "LED controller not found. Check USB cable/power."
-            )
+            if (now - self._last_missing_status_t) >= 5.0:
+                self._last_missing_status_t = now
+                self._bridge.set_led_controller_status_text(
+                    "LED controller not found. Check USB cable/power."
+                )
+            self._set_retry_step(min(self._retry_step + 1, 5))
             return
         self._open_port(port)
 
@@ -133,6 +169,9 @@ class SerialService(QObject):
                 score += 3
             if "cp210" in desc or "ch340" in desc:
                 score += 2
+            if self._preferred_port and str(p.device) == self._preferred_port:
+                # Prefer last known good endpoint after replug.
+                score += 10
             if score > 0:
                 ranked.append((score, p.device))
 
@@ -158,14 +197,17 @@ class SerialService(QObject):
                 return
             self._ser = s
             self._port_name = port
+            self._preferred_port = port
             self._was_connected = True
+            self._idle_led_off_active = False
+            self._set_retry_step(0)
             self._bridge.set_led_controller_state(True, port)
             self._bridge.toast(f"LED controller connected ({port})")
             # Sync LED output immediately based on preset mode.
             self._sync_led_output(force=True)
-        except Exception:
+        except Exception as exc:
             self._bridge.set_led_controller_status_text(
-                f"LED controller open failed on {port}. Retrying..."
+                f"LED controller open failed on {port}: {exc}. Retrying..."
             )
             self._close()
 
@@ -202,13 +244,15 @@ class SerialService(QObject):
             self._last_dim_sent = pct
 
     def _sync_led_output(self, *, force: bool = False) -> None:
-        # AUTO follows brightness slider. Manual preset enforces fixed 50%.
+        # AUTO follows brightness slider; manual follows current brightness value.
         if bool(self._bridge.ledsPresetAuto):
             target = int(self._bridge.brightness)
         else:
-            target = 50
+            target = int(self._bridge.brightness)
         self._pending_dim = target
         if self._ser is None:
+            return
+        if self._idle_led_off_active:
             return
         self._send_dim(target, force=force)
 
@@ -242,7 +286,7 @@ class SerialService(QObject):
 
     @pyqtSlot(int)
     def _on_bridge_brightness_changed(self, v: int) -> None:
-        if not bool(self._bridge.ledsPresetAuto):
+        if self._idle_led_off_active:
             return
         self._pending_dim = max(0, min(100, int(v)))
         if self._ser is None:
@@ -251,12 +295,24 @@ class SerialService(QObject):
 
     @pyqtSlot(bool)
     def _on_leds_preset_changed(self, auto_on: bool) -> None:
-        # Keep UI and output consistent when entering fixed 50% mode.
-        if not bool(auto_on):
-            try:
-                if int(self._bridge.brightness) != 50:
-                    self._bridge.set_brightness(50)
-            except Exception:
-                pass
         self._sync_led_output(force=True)
+
+    @pyqtSlot(int)
+    def _on_frame_activity(self, _v: int) -> None:
+        self._last_video_activity_t = time.monotonic()
+        if self._idle_led_off_active:
+            self._idle_led_off_active = False
+            self._sync_led_output(force=True)
+            self._bridge.toast("LEDs restored after activity")
+
+    def _on_idle_check(self) -> None:
+        if self._ser is None:
+            return
+        if self._idle_led_off_active:
+            return
+        if (time.monotonic() - self._last_video_activity_t) < self._idle_timeout_s:
+            return
+        if self._write_line("OFF"):
+            self._idle_led_off_active = True
+            self._bridge.toast("LEDs auto-off due to idle video feed")
 

@@ -18,6 +18,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STORAGE_CONFIG_PATH = PROJECT_ROOT / "config" / "storage_config.json"
 DEFAULT_EXPORT_WARN_FREE_BYTES = 1 * 1024 * 1024 * 1024   # 1 GiB
 DEFAULT_EXPORT_RESERVE_BYTES = 128 * 1024 * 1024          # 128 MiB
+try:
+    import cv2  # type: ignore
+    import pydicom  # type: ignore
+    from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage, generate_uid
+    _HAS_DICOM = True
+except Exception:
+    cv2 = None  # type: ignore
+    pydicom = None  # type: ignore
+    ExplicitVRLittleEndian = None  # type: ignore
+    SecondaryCaptureImageStorage = None  # type: ignore
+    generate_uid = None  # type: ignore
+    _HAS_DICOM = False
 
 
 class DentalBridge(QObject):
@@ -51,6 +63,8 @@ class DentalBridge(QObject):
     burstActiveChanged          = pyqtSignal(bool)
     burstProgressTextChanged    = pyqtSignal(str)
     captureDelaySecChanged      = pyqtSignal(int)
+    captureBurstCountChanged    = pyqtSignal(int)
+    captureBurstIntervalSecChanged = pyqtSignal(int)
     cameraSoundEnabledChanged   = pyqtSignal(bool)
     storageSdcardChanged        = pyqtSignal(bool)
     camerasDetectedCountChanged = pyqtSignal(int)
@@ -62,6 +76,7 @@ class DentalBridge(QObject):
     patientIdChanged            = pyqtSignal(str)
     useLastPatientIdChanged     = pyqtSignal(bool)
     captureNamePreviewChanged   = pyqtSignal(str)
+    settingsUnlockedChanged     = pyqtSignal(bool)
     flipHorizontalChanged       = pyqtSignal(bool)
     flipVerticalChanged         = pyqtSignal(bool)
     rotateQuarterTurnsChanged   = pyqtSignal(int)
@@ -91,6 +106,7 @@ class DentalBridge(QObject):
     exportAllCompleted = pyqtSignal(
         str, int, int, int, arguments=["folderPath", "exportedCount", "renamedCount", "failedCount"]
     )
+    settingsUnlockRequested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -133,6 +149,8 @@ class DentalBridge(QObject):
         self._burst_active       = False
         self._burst_progress     = ""
         self._capture_delay_sec  = 10
+        self._capture_burst_count = 10
+        self._capture_burst_interval_sec = 2
         self._camera_sound       = False
         self._storage_sdcard     = False
         self._storage_status_text = "Storage: SYSTEM"
@@ -153,6 +171,9 @@ class DentalBridge(QObject):
         self._captures_dir       = Path(__file__).resolve().parent.parent / "captures"
         self._restore_settings_after_preview = False
         self._admin_exit_password = os.environ.get("DENTAL_ADMIN_PASSWORD", "admin")
+        self._settings_password = os.environ.get("DENTAL_SETTINGS_PASSWORD", "admin")
+        self._settings_unlocked = False
+        self._pending_export_mode = "images"  # "images" | "dicom"
         self._storage_space_cfg = {}
         self._load_storage_space_cfg()
 
@@ -241,6 +262,12 @@ class DentalBridge(QObject):
     @pyqtProperty(int,  notify=captureDelaySecChanged)
     def captureDelaySec(self): return self._capture_delay_sec
 
+    @pyqtProperty(int, notify=captureBurstCountChanged)
+    def captureBurstCount(self): return self._capture_burst_count
+
+    @pyqtProperty(int, notify=captureBurstIntervalSecChanged)
+    def captureBurstIntervalSec(self): return self._capture_burst_interval_sec
+
     @pyqtProperty(bool, notify=cameraSoundEnabledChanged)
     def cameraSoundEnabled(self): return self._camera_sound
 
@@ -278,6 +305,9 @@ class DentalBridge(QObject):
         pid = self._sanitize_name(self._patient_id)
         base = f"{pid}_{mode}" if pid else mode
         return f"{base}_YYYYMMDD_HHMMSS.{fmt}"
+
+    @pyqtProperty(bool, notify=settingsUnlockedChanged)
+    def settingsUnlocked(self): return self._settings_unlocked
 
     @pyqtProperty(bool, notify=flipHorizontalChanged)
     def flipHorizontal(self): return self._flip_h
@@ -549,6 +579,9 @@ class DentalBridge(QObject):
 
     @pyqtSlot(bool)
     def onSettingsPanelToggled(self, v):
+        if v and not self._settings_unlocked:
+            self.settingsUnlockRequested.emit()
+            return
         self._settings_panel_vis = v
         self.settingsPanelVisibleChanged.emit(v)
         if v and self._img_settings_vis:
@@ -822,7 +855,17 @@ class DentalBridge(QObject):
             return
         self._leds_auto = auto_on
         self.ledsPresetAutoChanged.emit(auto_on)
-        self.toast("LED preset: AUTO" if auto_on else "LED preset: 50%")
+        self.toast("LED preset: AUTO" if auto_on else "LED preset: MANUAL")
+
+    @pyqtSlot(str)
+    def onLedsPresetManual(self, preset):
+        p = str(preset or "").strip().lower()
+        if p not in ("off", "high"):
+            return
+        self.onLedsPresetAuto(False)
+        target = 0 if p == "off" else 100
+        self.set_brightness(target)
+        self.toast("LED preset: OFF" if target == 0 else "LED preset: HIGH")
 
     @pyqtSlot(bool)
     def onCaptureBurstMode(self, burst):
@@ -839,6 +882,20 @@ class DentalBridge(QObject):
         if self._capture_delay_sec != sec:
             self._capture_delay_sec = sec
             self.captureDelaySecChanged.emit(sec)
+
+    @pyqtSlot(int)
+    def onCaptureBurstCount(self, count):
+        count = max(1, min(99, int(count)))
+        if self._capture_burst_count != count:
+            self._capture_burst_count = count
+            self.captureBurstCountChanged.emit(count)
+
+    @pyqtSlot(int)
+    def onCaptureBurstIntervalSec(self, sec):
+        sec = max(1, min(600, int(sec)))
+        if self._capture_burst_interval_sec != sec:
+            self._capture_burst_interval_sec = sec
+            self.captureBurstIntervalSecChanged.emit(sec)
 
     @pyqtSlot(bool)
     def onCameraSoundToggled(self, v):
@@ -869,6 +926,12 @@ class DentalBridge(QObject):
 
     @pyqtSlot()
     def onExportAllClicked(self):
+        self._pending_export_mode = "images"
+        self.exportAllFolderPickerRequested.emit()
+
+    @pyqtSlot()
+    def onExportDicomClicked(self):
+        self._pending_export_mode = "dicom"
         self.exportAllFolderPickerRequested.emit()
 
     def _decode_folder_input(self, folder: str) -> Path:
@@ -964,6 +1027,9 @@ class DentalBridge(QObject):
         ok = 0
         renamed = 0
         failed = 0
+        if self._pending_export_mode == "dicom":
+            self._export_dicom_to_folder(dst)
+            return
         for item in self._capture_items:
             src = Path(str(item.get("path", "")))
             if not src.is_file():
@@ -996,12 +1062,106 @@ class DentalBridge(QObject):
         except Exception:
             pass
 
+    def _export_dicom_to_folder(self, dst: Path) -> None:
+        if not _HAS_DICOM or cv2 is None or pydicom is None or generate_uid is None:
+            self.toast("DICOM export unavailable: install pydicom and opencv-python")
+            return
+        ok = 0
+        failed = 0
+        for item in self._capture_items:
+            src = Path(str(item.get("path", "")))
+            if not src.is_file():
+                failed += 1
+                continue
+            try:
+                img = cv2.imread(str(src), cv2.IMREAD_COLOR)
+                if img is None or img.size == 0:
+                    failed += 1
+                    continue
+                rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                h, w = rgb.shape[:2]
+
+                file_meta = pydicom.dataset.FileMetaDataset()
+                file_meta.MediaStorageSOPClassUID = SecondaryCaptureImageStorage
+                file_meta.MediaStorageSOPInstanceUID = generate_uid()
+                file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+                file_meta.ImplementationClassUID = generate_uid()
+
+                ds = pydicom.dataset.FileDataset(None, {}, file_meta=file_meta, preamble=b"\0" * 128)
+                now = datetime.now()
+                ds.Modality = "XC"
+                ds.SOPClassUID = file_meta.MediaStorageSOPClassUID
+                ds.SOPInstanceUID = file_meta.MediaStorageSOPInstanceUID
+                ds.StudyInstanceUID = generate_uid()
+                ds.SeriesInstanceUID = generate_uid()
+                ds.PatientName = str(self._patient_id or "Unknown")
+                ds.PatientID = str(self._patient_id or "UNKNOWN")
+                ds.StudyDate = now.strftime("%Y%m%d")
+                ds.StudyTime = now.strftime("%H%M%S")
+                ds.ContentDate = now.strftime("%Y%m%d")
+                ds.ContentTime = now.strftime("%H%M%S")
+                ds.Rows = h
+                ds.Columns = w
+                ds.SamplesPerPixel = 3
+                ds.PhotometricInterpretation = "RGB"
+                ds.PlanarConfiguration = 0
+                ds.BitsAllocated = 8
+                ds.BitsStored = 8
+                ds.HighBit = 7
+                ds.PixelRepresentation = 0
+                ds.PixelData = rgb.tobytes()
+                ds.is_little_endian = True
+                ds.is_implicit_VR = False
+
+                out_path = dst / f"{src.stem}.dcm"
+                i = 1
+                while out_path.exists():
+                    out_path = dst / f"{src.stem}_{i}.dcm"
+                    i += 1
+                ds.save_as(str(out_path), write_like_original=False)
+                ok += 1
+            except Exception:
+                failed += 1
+
+        if failed == 0:
+            self.toast(f"DICOM export complete: {ok} files")
+        else:
+            self.toast(f"DICOM export complete: {ok} ok, {failed} failed")
+        try:
+            self.exportAllCompleted.emit(str(dst), int(ok), 0, int(failed))
+        except Exception:
+            pass
+
     @pyqtSlot(str)
     def onRequestAppExit(self, password):
         if str(password or "") == self._admin_exit_password:
             self.appExitRequested.emit()
         else:
             self.toast("Invalid admin password")
+
+    @pyqtSlot(str)
+    def onRequestSettingsUnlock(self, password):
+        if str(password or "") == self._settings_password:
+            if not self._settings_unlocked:
+                self._settings_unlocked = True
+                self.settingsUnlockedChanged.emit(True)
+            self._settings_panel_vis = True
+            self.settingsPanelVisibleChanged.emit(True)
+            if self._img_settings_vis:
+                self._img_settings_vis = False
+                self.imageSettingsVisibleChanged.emit(False)
+        else:
+            self.toast("Invalid settings password")
+
+    @pyqtSlot()
+    def onLockSettingsPanel(self):
+        if self._settings_unlocked:
+            self._settings_unlocked = False
+            self.settingsUnlockedChanged.emit(False)
+        if self._settings_panel_vis:
+            self._settings_panel_vis = False
+            self.settingsPanelVisibleChanged.emit(False)
+        self.toast("Settings locked")
 
     @pyqtSlot()
     def onCapturePreviewOpen(self):

@@ -172,6 +172,16 @@ Rectangle {
                         onClicked: bridge.onExportAllClicked()
                     }
                 }
+                Text {
+                    text: "DICOM"
+                    font.pixelSize: 12
+                    color: Qt.rgba(0.72, 0.88, 1, 0.92)
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: bridge.onExportDicomClicked()
+                    }
+                }
             }
 
             RowLayout {
@@ -277,9 +287,14 @@ Rectangle {
                 spacing: 10
                 Layout.bottomMargin: 16
                 SettingsPillButton {
-                    text: "50%"
-                    active: !bridge.ledsPresetAuto
-                    onClicked: bridge.onLedsPresetAuto(false)
+                    text: "OFF"
+                    active: !bridge.ledsPresetAuto && bridge.brightness === 0
+                    onClicked: bridge.onLedsPresetManual("off")
+                }
+                SettingsPillButton {
+                    text: "HIGH"
+                    active: !bridge.ledsPresetAuto && bridge.brightness === 100
+                    onClicked: bridge.onLedsPresetManual("high")
                 }
                 SettingsPillButton {
                     text: "AUTO"
@@ -308,7 +323,7 @@ Rectangle {
             }
 
             Text {
-                text: "Delay"
+                text: "Pre-capture delay"
                 font.pixelSize: 12
                 color: Qt.rgba(1, 1, 1, 0.75)
                 Layout.bottomMargin: 8
@@ -344,6 +359,82 @@ Rectangle {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             onClicked: bridge.onCaptureDelaySec(modelData)
+                        }
+                    }
+                }
+            }
+
+            Text {
+                visible: bridge.captureBurstMode
+                text: "Burst count"
+                font.pixelSize: 12
+                color: Qt.rgba(1, 1, 1, 0.75)
+                Layout.bottomMargin: 8
+            }
+            Row {
+                visible: bridge.captureBurstMode
+                Layout.fillWidth: true
+                Layout.preferredHeight: 42
+                spacing: 8
+                Layout.bottomMargin: 12
+                Repeater {
+                    model: [5, 10, 20, 30]
+                    delegate: Rectangle {
+                        required property int modelData
+                        readonly property bool sel: bridge.captureBurstCount === modelData
+                        width: 44; height: 40; radius: 20
+                        color: sel ? "#f2f2f6" : "transparent"
+                        border.width: 1
+                        border.color: sel ? Qt.rgba(1, 1, 1, 0.65) : Qt.rgba(1, 1, 1, 0.45)
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData
+                            font.pixelSize: 12
+                            font.bold: sel
+                            color: sel ? "#1a1c22" : "#ffffff"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: bridge.onCaptureBurstCount(modelData)
+                        }
+                    }
+                }
+            }
+
+            Text {
+                visible: bridge.captureBurstMode
+                text: "Burst interval (seconds)"
+                font.pixelSize: 12
+                color: Qt.rgba(1, 1, 1, 0.75)
+                Layout.bottomMargin: 8
+            }
+            Row {
+                visible: bridge.captureBurstMode
+                Layout.fillWidth: true
+                Layout.preferredHeight: 42
+                spacing: 8
+                Layout.bottomMargin: 16
+                Repeater {
+                    model: [1, 2, 3, 5, 10]
+                    delegate: Rectangle {
+                        required property int modelData
+                        readonly property bool sel: bridge.captureBurstIntervalSec === modelData
+                        width: 44; height: 40; radius: 20
+                        color: sel ? "#f2f2f6" : "transparent"
+                        border.width: 1
+                        border.color: sel ? Qt.rgba(1, 1, 1, 0.65) : Qt.rgba(1, 1, 1, 0.45)
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData
+                            font.pixelSize: 12
+                            font.bold: sel
+                            color: sel ? "#1a1c22" : "#ffffff"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: bridge.onCaptureBurstIntervalSec(modelData)
                         }
                     }
                 }
@@ -390,6 +481,17 @@ Rectangle {
                 color: Qt.rgba(1, 1, 1, 0.62)
                 elide: Text.ElideMiddle
                 Layout.bottomMargin: 22
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.bottomMargin: 22
+                SettingsPillButton {
+                    text: "LOCK SETTINGS"
+                    active: false
+                    onClicked: bridge.onLockSettingsPanel()
+                }
+                Item { Layout.fillWidth: true }
             }
 
             // —— About ——

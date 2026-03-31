@@ -9,6 +9,7 @@ This checklist tracks the current implementation state against `project_requirem
 - Digital zoom, pinch gesture, one-finger pan, ROI select/apply, recenter
 - Overlay toggles (grid and crosshair)
 - Capture in snapshot and burst modes with optional delay
+- Burst sequence controls (count + interval) in Settings
 - Capture save with PNG/JPG selection and quality setting
 - Patient ID naming workflow and "use last patient ID" option
 - Capture confirmation modal and capture preview modal/gallery
@@ -18,14 +19,17 @@ This checklist tracks the current implementation state against `project_requirem
 - Storage free-space guards: low-space warnings and export/capture blocking on critically low space
 - Storage thresholds are configurable via `config/storage_config.json` (`space_thresholds`)
 - ESP32 serial service (auto-detect, reconnect, status polling, brightness sync)
-- LED preset behavior (AUTO follows slider, manual fixed 50%)
+- LED preset behavior (AUTO, manual OFF/HIGH presets)
+- LED idle auto-off timer (configurable via `DENTAL_LED_IDLE_MINUTES`, default 5 min)
 - Kiosk full-screen mode with password-protected exit
+- Settings panel password lock (`DENTAL_SETTINGS_PASSWORD`)
+- DICOM export action from Settings (exports captured images as Secondary Capture DICOM files)
 
 ## Partially Implemented
 
 - Basler default initialization values from SOW: implemented via camera defaults file when present; verify exact exposure/gain defaults on production hardware
 - SD card full-capacity warning: implemented for capture/export paths; validate thresholds on production image sizes
-- Preset long-press save with sound confirmation: save/recall exists; long-press UX and confirmation sound should be verified end-to-end
+- Preset long-press save with sound confirmation: implemented; verify on target speaker/touch hardware
 - Dentist workflow validation/testing report: core features implemented, but formal test report still pending
 
 ## Pending

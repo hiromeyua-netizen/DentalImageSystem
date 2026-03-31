@@ -89,7 +89,7 @@ class CameraService(QObject):
         self._burst_active = False
         self._burst_stop_requested = False
         self._burst_index = 0
-        self._burst_total = BURST_DEFAULT_COUNT
+        self._burst_total = max(1, int(getattr(self._bridge, "captureBurstCount", BURST_DEFAULT_COUNT)))
         self._timer = QTimer(self)
         self._timer.setInterval(max(16, int(round(1000 / TARGET_FPS))))
         self._timer.timeout.connect(self._on_frame_tick)
@@ -365,6 +365,7 @@ class CameraService(QObject):
             return
         self._presets[k] = self._preset_snapshot_from_bridge()
         self._save_presets()
+        self._play_capture_sound()
         self._bridge.toast(f"Preset {int(index) + 1} saved")
 
     @pyqtSlot(int)
@@ -754,7 +755,7 @@ class CameraService(QObject):
         self._burst_active = True
         self._burst_stop_requested = False
         self._burst_index = 0
-        self._burst_total = BURST_DEFAULT_COUNT
+        self._burst_total = max(1, int(self._bridge.captureBurstCount))
         self._bridge.set_burst_state(True, f"Burst 0/{self._burst_total}")
         self._bridge.toast("Burst started. Tap capture again to stop.")
         self._burst_timer.start(0)
@@ -798,5 +799,5 @@ class CameraService(QObject):
             self._stop_burst_internal(silent=False)
             return
 
-        interval_ms = max(200, int(self._bridge.captureDelaySec) * 1000)
+        interval_ms = max(200, int(self._bridge.captureBurstIntervalSec) * 1000)
         self._burst_timer.start(interval_ms)
