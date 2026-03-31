@@ -13,9 +13,13 @@ Popup {
     x: Math.round(((Window.window ? Window.window.width : 1280) - width) / 2)
     y: Math.round(((Window.window ? Window.window.height : 720) - height) / 2)
 
-    readonly property var items: bridge.captureItems
-    readonly property int sel: bridge.capturePreviewIndex
-    readonly property var selectedItem: (sel >= 0 && sel < items.length) ? items[sel] : null
+    function selectedItem() {
+        const i = bridge.capturePreviewIndex
+        const arr = bridge.captureItems
+        if (!arr || i < 0 || i >= arr.length)
+            return null
+        return arr[i]
+    }
 
     background: Rectangle {
         radius: 20
@@ -66,14 +70,20 @@ Popup {
                         anchors.fill: parent
                         anchors.margins: 8
                         fillMode: Image.PreserveAspectFit
-                        source: root.selectedItem ? root.selectedItem.url : ""
+                        source: {
+                            const it = root.selectedItem()
+                            return it ? String(it.url || "") : ""
+                        }
                         smooth: true
                     }
                 }
 
                 Text {
                     Layout.fillWidth: true
-                    text: root.selectedItem ? root.selectedItem.name : "No image selected"
+                    text: {
+                        const it = root.selectedItem()
+                        return it ? String(it.name || "") : "No image selected"
+                    }
                     font.pixelSize: 18
                     font.bold: true
                     color: "#ffffff"
@@ -81,7 +91,10 @@ Popup {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: root.selectedItem ? root.selectedItem.datetime : ""
+                    text: {
+                        const it = root.selectedItem()
+                        return it ? String(it.datetime || "") : ""
+                    }
                     font.pixelSize: 13
                     color: Qt.rgba(1, 1, 1, 0.75)
                 }
@@ -141,50 +154,71 @@ Popup {
                 border.color: Qt.rgba(1, 1, 1, 0.24)
                 clip: true
 
-                Flickable {
-                    id: flick
+                GridView {
+                    id: gallery
                     anchors.fill: parent
                     anchors.margins: 10
-                    contentWidth: grid.width
-                    contentHeight: grid.height
+                    model: bridge.captureItems
+                    cellWidth: Math.floor((width - 3 * 10) / 4)
+                    cellHeight: Math.round(cellWidth * 0.86)
                     clip: true
+                    interactive: true
+                    boundsBehavior: Flickable.StopAtBounds
 
-                    Grid {
-                        id: grid
-                        columns: 4
-                        spacing: 10
-                        width: flick.width
+                    delegate: Item {
+                        required property int index
+                        required property var modelData
+                        readonly property var item: modelData
 
-                        Repeater {
-                            model: bridge.captureItems.length
-                            delegate: Rectangle {
-                                required property int index
-                                readonly property var item: bridge.captureItems[index]
-                                width: Math.floor((grid.width - grid.spacing * (grid.columns - 1)) / grid.columns)
-                                height: Math.round(width * 0.72)
-                                radius: 8
-                                color: Qt.rgba(1, 1, 1, 0.08)
-                                border.width: bridge.capturePreviewIndex === index ? 2 : 1
-                                border.color: bridge.capturePreviewIndex === index
-                                    ? Qt.rgba(1, 1, 1, 0.95)
-                                    : Qt.rgba(1, 1, 1, 0.26)
+                        width: gallery.cellWidth
+                        height: gallery.cellHeight
 
-                                Image {
-                                    anchors.fill: parent
-                                    anchors.margins: 4
-                                    fillMode: Image.PreserveAspectCrop
-                                    source: item.url
-                                    smooth: true
-                                }
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: Math.round(parent.height * 0.78)
+                            radius: 8
+                            color: Qt.rgba(1, 1, 1, 0.08)
+                            border.width: bridge.capturePreviewIndex === index ? 2 : 1
+                            border.color: bridge.capturePreviewIndex === index
+                                ? Qt.rgba(1, 1, 1, 0.95)
+                                : Qt.rgba(1, 1, 1, 0.26)
 
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: bridge.onCapturePreviewSelect(index)
-                                }
+                            Image {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                fillMode: Image.PreserveAspectCrop
+                                source: String(item.url || "")
+                                smooth: true
                             }
                         }
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            text: String(item.name || "")
+                            color: Qt.rgba(1, 1, 1, 0.78)
+                            font.pixelSize: 11
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: bridge.onCapturePreviewSelect(index)
+                        }
                     }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: bridge.captureItems.length === 0
+                    text: "No captured images"
+                    color: Qt.rgba(1, 1, 1, 0.75)
+                    font.pixelSize: 14
                 }
             }
         }
@@ -211,5 +245,7 @@ Popup {
             onClicked: bridge.onCapturePreviewClose()
         }
     }
+
+    onOpened: bridge.onCapturePreviewRefresh()
 }
 
