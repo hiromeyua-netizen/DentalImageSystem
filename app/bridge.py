@@ -741,6 +741,7 @@ class DentalBridge(QObject):
         # Capture prefs
         self._capture_format_png = _b("captureFormatPng", self._capture_format_png, self.captureFormatPngChanged)
         self._image_quality = _i("imageQuality", 1, 100, self._image_quality, self.imageQualityChanged)
+        self._auto_color = _b("autoColor", self._auto_color, self.autoColorChanged)
 
     @pyqtSlot(bool)
     def onAutoColorToggled(self, v):

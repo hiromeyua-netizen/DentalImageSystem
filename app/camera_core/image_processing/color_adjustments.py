@@ -76,3 +76,43 @@ def apply_software_image_adjustments(
     out = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
 
     return out
+
+
+def compute_auto_color_gains(bgr: np.ndarray) -> np.ndarray:
+    """
+    Gray-world style per-channel gains (BGR order) from a frame or crop.
+
+    Uses a luminance percentile mask to reduce bias from deep shadows and
+    clipped highlights.
+    """
+    if bgr is None or bgr.size == 0:
+        return np.array([1.0, 1.0, 1.0], dtype=np.float32)
+    px = bgr.reshape(-1, 3).astype(np.float32)
+    if px.shape[0] < 50:
+        return np.array([1.0, 1.0, 1.0], dtype=np.float32)
+
+    luma = 0.114 * px[:, 0] + 0.587 * px[:, 1] + 0.299 * px[:, 2]
+    lo, hi = np.percentile(luma, [5, 95])
+    mask = (luma >= lo) & (luma <= hi)
+    if int(np.count_nonzero(mask)) >= 50:
+        px = px[mask]
+
+    means = np.maximum(px.mean(axis=0), 1.0)
+    target = float(np.mean(means))
+    gains = target / means
+    gains = np.clip(gains, 0.70, 1.40)
+    return gains.astype(np.float32)
+
+
+def apply_auto_color_balance(bgr: np.ndarray, gains: np.ndarray) -> np.ndarray:
+    """Apply BGR channel multipliers; identity when gains ≈ 1."""
+    if bgr is None or bgr.size == 0:
+        return bgr
+    g = np.asarray(gains, dtype=np.float32).reshape(3)
+    if np.allclose(g, 1.0, atol=1e-3):
+        return bgr
+    f = bgr.astype(np.float32)
+    f[:, :, 0] *= float(g[0])
+    f[:, :, 1] *= float(g[1])
+    f[:, :, 2] *= float(g[2])
+    return np.clip(f, 0, 255).astype(np.uint8)

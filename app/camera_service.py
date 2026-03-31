@@ -34,13 +34,17 @@ except Exception:  # pragma: no cover - optional env without pypylon
 try:
     from camera_core.image_processing.color_adjustments import (
         ImageSettingsPercent,
+        apply_auto_color_balance,
         apply_software_image_adjustments,
+        compute_auto_color_gains,
     )
 
     _HAS_COLOR_ADJ = True
 except Exception:  # pragma: no cover
     ImageSettingsPercent = None  # type: ignore[assignment,misc]
     apply_software_image_adjustments = None  # type: ignore[assignment,misc]
+    apply_auto_color_balance = None  # type: ignore[assignment,misc]
+    compute_auto_color_gains = None  # type: ignore[assignment,misc]
     _HAS_COLOR_ADJ = False
 
 try:
@@ -115,6 +119,8 @@ class CameraService(QObject):
         self._on_storage_target_changed(bool(self._bridge.storageSdcard))
         self._bridge.patientIdChanged.connect(self._on_patient_id_changed)
         self._bridge.useLastPatientIdChanged.connect(self._on_use_last_patient_changed)
+        self._bridge.autoColorChanged.connect(self._on_bridge_auto_color_changed)
+        self._auto_color_gains = np.ones(3, dtype=np.float32)
 
     # ── Storage target routing (SYSTEM / SD CARD) ───────────────────────────
     def _detect_sd_capture_dir(self) -> Optional[Path]:
@@ -352,6 +358,7 @@ class CameraService(QObject):
             "tint": int(self._bridge.tint),
             "captureFormatPng": bool(self._bridge.captureFormatPng),
             "imageQuality": int(self._bridge.imageQuality),
+            "autoColor": bool(self._bridge.autoColor),
         }
 
     @pyqtSlot(int)
@@ -527,6 +534,30 @@ class CameraService(QObject):
         except Exception:
             return frame
 
+    def _on_bridge_auto_color_changed(self, _enabled: bool) -> None:
+        # Neutral gains on toggle so the next frames re-learn smoothly from scratch.
+        self._auto_color_gains = np.ones(3, dtype=np.float32)
+
+    def _apply_auto_color_stage(self, frame: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        if frame is None or frame.size == 0:
+            return frame
+        if not bool(self._bridge.autoColor):
+            return frame
+        if (
+            not _HAS_COLOR_ADJ
+            or compute_auto_color_gains is None
+            or apply_auto_color_balance is None
+        ):
+            return frame
+        try:
+            target = compute_auto_color_gains(frame)
+            self._auto_color_gains = (
+                0.8 * self._auto_color_gains + 0.2 * target
+            ).astype(np.float32)
+            return apply_auto_color_balance(frame, self._auto_color_gains)
+        except Exception:
+            return frame
+
     def _exposure_us_from_slider(self) -> int:
         pct = max(0, min(100, int(self._bridge.exposure)))
         span = EXPOSURE_US_MAX - EXPOSURE_US_MIN
@@ -588,6 +619,9 @@ class CameraService(QObject):
         if frame is None or frame.size == 0:
             return
         frame = self._apply_software_image_adjustments(frame)
+        frame = self._apply_auto_color_stage(frame)
+        if frame is None or frame.size == 0:
+            return
         self._provider.update_overview(frame)
         cropped, x0, y0, cw, ch, fw, fh = zoom_crop_pan(
             frame,
@@ -685,6 +719,10 @@ class CameraService(QObject):
                 return False, ""
 
             frame = self._apply_software_image_adjustments(frame)
+            frame = self._apply_auto_color_stage(frame)
+            if frame is None or frame.size == 0:
+                self._bridge.toast("Capture failed. Please try again.")
+                return False, ""
             cropped, *_ = zoom_crop_pan(
                 frame,
                 self._bridge.zoom,
