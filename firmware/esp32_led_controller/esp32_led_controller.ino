@@ -22,8 +22,10 @@
 // ---- Hardware ----
 static const uint8_t PWM_PIN = 2;       // IO02
 static const uint8_t PWM_CH = 0;
-static const uint32_t PWM_FREQ = 20000; // 20 kHz (quiet for LEDs)
-static const uint8_t PWM_RES_BITS = 12; // 0..4095
+// BuckPuck-style dim inputs typically behave best in the low-kHz range.
+// Very high PWM can reduce effective dim range on some drivers.
+static const uint32_t PWM_FREQ = 1000;  // 1 kHz
+static const uint8_t PWM_RES_BITS = 10; // 0..1023, sufficient for smooth dimming
 // Hardware polarity: true for active-low LED driver input (inverted brightness response).
 static const bool PWM_ACTIVE_LOW = true;
 
@@ -34,6 +36,14 @@ static String g_line;
 
 static uint32_t pctToDuty(uint8_t pct) {
   const uint32_t maxDuty = (1UL << PWM_RES_BITS) - 1UL;
+  // Guarantee electrical extremes at endpoints.
+  if (pct == 0) {
+    return PWM_ACTIVE_LOW ? maxDuty : 0;
+  }
+  if (pct >= 100) {
+    return PWM_ACTIVE_LOW ? 0 : maxDuty;
+  }
+
   uint32_t duty = (uint32_t)((maxDuty * (uint32_t)pct) / 100UL);
   if (PWM_ACTIVE_LOW) {
     duty = maxDuty - duty;
