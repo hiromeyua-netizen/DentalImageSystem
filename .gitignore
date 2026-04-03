@@ -39,7 +39,6 @@ venv.bak/
 .DS_Store
 
 # PyInstaller
-*.spec
 build/
 dist/
 

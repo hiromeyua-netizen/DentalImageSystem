@@ -71,6 +71,10 @@ Not recommended for this QML app (slow startup, occasional antivirus false posit
 
 | Issue | What to try |
 |-------|-------------|
+| **`ERROR: Hidden import 'PyQt6.QtQuickControls2' not found`** | Do **not** list `PyQt6.QtQuickControls2` in `hiddenimports` — it is not a separate Python module in many PyQt6 installs; QML `QtQuick.Controls` is loaded via Qt plugins. The spec in this repo omits it. |
+| **`EndUpdateResourceW` / file in use** | **Close** `DentalImaging.exe` if it is running, close **Task Manager** handles, and avoid having the exe selected in Explorer preview. Re-run `pyinstaller`. |
 | Missing module at runtime | Add the module to `hiddenimports` in `DentalImaging.spec` and rebuild. |
 | QML / white window | Ensure `app/qml` is listed in `datas` in the spec (already present). |
 | Huge build pulling pytest/pandas | The spec **excludes** some test/doc packages; adjust `excludes` if something needed is stripped. |
+
+**Harmless log lines:** Warnings about **`list_ports_osx`** and macOS frameworks come from **pyserial**; they can be ignored on Windows.
