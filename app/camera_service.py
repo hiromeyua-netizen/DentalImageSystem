@@ -16,8 +16,9 @@ import numpy as np
 from PyQt6.QtCore import QObject, QTimer, pyqtSlot
 
 from view_transforms import apply_view_transforms, zoom_crop_pan
+from runtime_paths import project_root
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = project_root()
 
 try:
     from camera_core.hardware.camera import detect_cameras

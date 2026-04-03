@@ -69,9 +69,11 @@ dental_image_system/
 ├── app/                 # Kiosk UI (PyQt6 + QML) and ``camera_core/`` (Basler + snapshot)
 ├── config/              # Configuration files
 ├── firmware/            # ESP32 LED controller (Arduino)
-├── docs/                # Client user guide (see CLIENT_USER_GUIDE.md)
+├── docs/                # User guide, build notes, deliverables
 ├── logs/                # Runtime logs (if used)
-├── RunDentalImaging.bat # Windows: install deps (venv) and launch UI
+├── RunDentalImaging.bat # Windows: venv + pip + run from source
+├── build_exe.bat        # Windows: PyInstaller build → dist/DentalImaging/
+├── DentalImaging.spec   # PyInstaller spec (onedir exe)
 ├── kiosk_main.py        # Console entry that runs ``app/main.py``
 └── project_requirements.txt
 ```
@@ -80,6 +82,17 @@ dental_image_system/
 
 - **`docs/PROJECT_DELIVERABLES.md`** — **What is delivered now**, mapped item-by-item to **`project_requirements.txt`** (for contracts and acceptance).
 - **`docs/CLIENT_USER_GUIDE.md`** — **Operator manual**: installation, workflows, troubleshooting (export to PDF for handoff if needed).
+- **`docs/BUILD_EXE.md`** — **Build a Windows `.exe`** with PyInstaller (`DentalImaging.spec`, **`build_exe.bat`**).
+
+## Building a Windows executable
+
+From the repo root (after `pip install -r requirements.txt` and `pip install pyinstaller`):
+
+```bat
+build_exe.bat
+```
+
+Or: `pyinstaller --noconfirm DentalImaging.spec` — output under **`dist/DentalImaging/`**. Ship that folder and keep **`config/`** next to **`DentalImaging.exe`**. Details: **`docs/BUILD_EXE.md`**.
 
 ## Configuration
 

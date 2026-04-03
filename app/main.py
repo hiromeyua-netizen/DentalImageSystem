@@ -2,12 +2,12 @@
 Dental Imaging System — fresh standalone UI.
 Run:  python app/main.py
 """
-import os, sys
-from pathlib import Path
+import os
+import sys
 
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 
-ROOT = Path(__file__).parent
+from runtime_paths import qml_root
 
 
 def main():
@@ -33,7 +33,7 @@ def main():
     engine.rootContext().setContextProperty("bridge", bridge)
     engine.rootContext().setContextProperty("cameraService", camera_service)
     bridge.powerClicked.connect(camera_service.toggle_connection)
-    engine.load(QUrl.fromLocalFile(str(ROOT / "qml" / "main.qml")))
+    engine.load(QUrl.fromLocalFile(str(qml_root() / "main.qml")))
 
     if not engine.rootObjects():
         return 1

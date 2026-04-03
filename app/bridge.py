@@ -14,7 +14,9 @@ from urllib.parse import unquote, urlparse
 
 from PyQt6.QtCore import QObject, pyqtProperty, pyqtSignal, pyqtSlot
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from runtime_paths import project_root
+
+PROJECT_ROOT = project_root()
 STORAGE_CONFIG_PATH = PROJECT_ROOT / "config" / "storage_config.json"
 DEFAULT_EXPORT_WARN_FREE_BYTES = 1 * 1024 * 1024 * 1024   # 1 GiB
 DEFAULT_EXPORT_RESERVE_BYTES = 128 * 1024 * 1024          # 128 MiB
@@ -168,7 +170,7 @@ class DentalBridge(QObject):
         self._capture_preview_visible = False
         self._capture_items      = []
         self._capture_preview_index = -1
-        self._captures_dir       = Path(__file__).resolve().parent.parent / "captures"
+        self._captures_dir       = project_root() / "captures"
         self._restore_settings_after_preview = False
         self._admin_exit_password = os.environ.get("DENTAL_ADMIN_PASSWORD", "admin")
         self._settings_password = os.environ.get("DENTAL_SETTINGS_PASSWORD", "admin")

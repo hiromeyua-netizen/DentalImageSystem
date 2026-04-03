@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from runtime_paths import project_root
+
 
 @dataclass(frozen=True)
 class ApplicationMeta:
@@ -99,8 +101,7 @@ def resolve_default_config_path() -> Path:
     if cwd_candidate.is_file():
         return cwd_candidate
 
-    repo_root = Path(__file__).resolve().parent.parent
-    return repo_root / "config" / "default_config.json"
+    return project_root() / "config" / "default_config.json"
 
 
 def resolve_camera_defaults_path() -> Path:
@@ -115,8 +116,7 @@ def resolve_camera_defaults_path() -> Path:
     if cwd_candidate.is_file():
         return cwd_candidate
 
-    repo_root = Path(__file__).resolve().parent.parent
-    return repo_root / "config" / "camera_defaults.json"
+    return project_root() / "config" / "camera_defaults.json"
 
 
 def resolve_storage_directory(settings: ApplicationSettings, base: Optional[Path] = None) -> Path:
