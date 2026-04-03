@@ -69,11 +69,17 @@ dental_image_system/
 ├── app/                 # Kiosk UI (PyQt6 + QML) and ``camera_core/`` (Basler + snapshot)
 ├── config/              # Configuration files
 ├── firmware/            # ESP32 LED controller (Arduino)
+├── docs/                # Client user guide (see CLIENT_USER_GUIDE.md)
 ├── logs/                # Runtime logs (if used)
 ├── RunDentalImaging.bat # Windows: install deps (venv) and launch UI
 ├── kiosk_main.py        # Console entry that runs ``app/main.py``
 └── project_requirements.txt
 ```
+
+## Documentation
+
+- **`docs/PROJECT_DELIVERABLES.md`** — **What is delivered now**, mapped item-by-item to **`project_requirements.txt`** (for contracts and acceptance).
+- **`docs/CLIENT_USER_GUIDE.md`** — **Operator manual**: installation, workflows, troubleshooting (export to PDF for handoff if needed).
 
 ## Configuration
 
